@@ -1,0 +1,19 @@
+diff -up nfs-utils-1.2.3/utils/mount/mount.c.orig nfs-utils-1.2.3/utils/mount/mount.c
+--- nfs-utils-1.2.3/utils/mount/mount.c.orig	2016-12-14 17:22:49.057511775 -0500
++++ nfs-utils-1.2.3/utils/mount/mount.c	2016-12-14 18:04:52.043119921 -0500
+@@ -464,6 +464,15 @@ int main(int argc, char *argv[])
+ 	if(!strncmp(progname, "umount", strlen("umount")))
+ 		exit(nfsumount(argc, argv));
+ 
++	if (argc == 2 && argv[1][0] == '-') {
++		if(argv[1][1] == 'V') {
++			printf("%s ("PACKAGE_STRING")\n", progname);
++			exit(EX_SUCCESS);
++		}
++		 mount_usage();
++		exit(EX_USAGE);
++	}
++
+ 	if ((argc < 3)) {
+ 		mount_usage();
+ 		exit(EX_USAGE);

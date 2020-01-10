@@ -1,0 +1,58 @@
+commit 8d6fdd68cb7de8259024e300ecfbdfbb54a614da
+Author: NeilBrown <neilb@suse.com>
+Date:   Sat Aug 20 10:39:52 2016 -0400
+
+    mount: RPC_PROGNOTREGISTERED should not be a permanent error
+    
+    Commit: bf66c9facb8e ("mounts.nfs: v2 and v3 background mounts should
+    retry when server is down.")
+    
+    changed the behaviour of "bg" mounts so that RPC_PROGNOTREGISTERED,
+    which maps to EOPNOTSUPP, is not a permanent error.
+    This useful because when an NFS server starts up there is a small window
+    between the moment that rpcbind (or portmap) starts responding to lookup
+    requests, and the moment when nfsd registers with rpcbind.  During that window
+    rpcbind will reply with RPC_PROGNOTREGISTERED, but mount should not give
+    up.
+    
+    This same reasoning applies to foreground mounts.  They don't wait for
+    as long, but could still hit the window and fail prematurely.
+    
+    So revert the above patch and instead add EOPNOTSUPP to the list of
+    temporary errors known to nfs_is_permanent_error.
+    
+    Signed-off-by: NeilBrown <neilb@suse.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/stropts.c b/utils/mount/stropts.c
+index 0778963..df0ae57 100644
+--- a/utils/mount/stropts.c
++++ b/utils/mount/stropts.c
+@@ -868,6 +868,7 @@ static int nfs_is_permanent_error(int error)
+ 	case ETIMEDOUT:
+ 	case ECONNREFUSED:
+ 	case EHOSTUNREACH:
++	case EOPNOTSUPP:	/* aka RPC_PROGNOTREGISTERED */
+ 		return 0;	/* temporary */
+ 	default:
+ 		return 1;	/* permanent */
+@@ -929,8 +930,7 @@ static int nfsmount_parent(struct nfsmount_info *mi)
+ 	if (nfs_try_mount(mi))
+ 		return EX_SUCCESS;
+ 
+-	/* retry background mounts when the server is not up */
+-	if (nfs_is_permanent_error(errno) && errno != EOPNOTSUPP) {
++	if (nfs_is_permanent_error(errno)) {
+ 		mount_error(mi->spec, mi->node, errno);
+ 		return EX_FAIL;
+ 	}
+@@ -965,8 +965,7 @@ static int nfsmount_child(struct nfsmount_info *mi)
+ 		if (nfs_try_mount(mi))
+ 			return EX_SUCCESS;
+ 
+-		/* retry background mounts when the server is not up */
+-		if (nfs_is_permanent_error(errno) && errno != EOPNOTSUPP)
++		if (nfs_is_permanent_error(errno))
+ 			break;
+ 
+ 		if (time(NULL) > timeout)

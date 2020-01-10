@@ -1,0 +1,40 @@
+commit 62ea170c7a164990e8ce8cbc1eb7f21df1046911
+Author: Prem Karat <prem.karat@linux.vnet.ibm.com>
+Date:   Thu Jun 30 07:29:20 2011 -0400
+
+    mount.nfs: Fix for the bug in v1.2.4 that breaks mount.nfs
+    
+    commit 30ebf047 failed to include these changes that breaks mount.nfs.
+    mount.nfs will continue to work fine with these changes
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/mount.c b/utils/mount/mount.c
+index 427eb21..c07775b 100644
+--- a/utils/mount/mount.c
++++ b/utils/mount/mount.c
+@@ -464,14 +464,6 @@ int main(int argc, char *argv[])
+ 	if(!strncmp(progname, "umount", strlen("umount")))
+ 		exit(nfsumount(argc, argv));
+ 
+-	if (argv[1] && argv[1][0] == '-') {
+-		if(argv[1][1] == 'V')
+-			printf("%s ("PACKAGE_STRING")\n", progname);
+-		else
+-			mount_usage();
+-		exit(EX_SUCCESS);
+-	}
+-
+ 	if ((argc < 3)) {
+ 		mount_usage();
+ 		exit(EX_USAGE);
+@@ -482,8 +474,7 @@ int main(int argc, char *argv[])
+ 
+ 	mount_config_init(progname);
+ 
+-	argv[2] = argv[0]; /* so that getopt error messages are correct */
+-	while ((c = getopt_long(argc - 2, argv + 2, "rvVwfno:hs",
++	while ((c = getopt_long(argc, argv, "rvVwfno:hs",
+ 				longopts, NULL)) != -1) {
+ 		switch (c) {
+ 		case 'r':

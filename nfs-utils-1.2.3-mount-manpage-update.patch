@@ -1,0 +1,41 @@
+diff --git a/utils/mount/mount.nfs.man b/utils/mount/mount.nfs.man
+index 1a4561b..5aa3fa3 100644
+--- a/utils/mount/mount.nfs.man
++++ b/utils/mount/mount.nfs.man
+@@ -76,10 +76,13 @@ file system table
+ .TP
+ .I /etc/mtab
+ table of mounted file systems
+-
++.TP
++.I /etc/nfsmount.conf
++Configuration file for NFS mounts
+ .PD
+ .SH "SEE ALSO"
+ .BR nfs (5),
++.BR nfsmount.conf (5),
+ .BR mount (8),
+ 
+ .SH "AUTHOR"
+diff --git a/utils/mount/nfs.man b/utils/mount/nfs.man
+index 7feaff2..cfe8437 100644
+--- a/utils/mount/nfs.man
++++ b/utils/mount/nfs.man
+@@ -1581,6 +1581,9 @@ with the mount options already saved on disk for the NFS server mounted at /mnt.
+ .TP 1.5i
+ .I /etc/fstab
+ file system table
++.TP 1.5i
++.I /etc/nfsmount.conf
++Configuration file for NFS mounts
+ .SH BUGS
+ Before 2.4.7, the Linux NFS client did not support NFS over TCP.
+ .P
+@@ -1610,6 +1613,7 @@ such as security negotiation, server referrals, and named attributes.
+ .BR mount.nfs (5),
+ .BR umount.nfs (5),
+ .BR exports (5),
++.BR nfsmount.conf (5),
+ .BR netconfig (5),
+ .BR ipv6 (7),
+ .BR nfsd (8),

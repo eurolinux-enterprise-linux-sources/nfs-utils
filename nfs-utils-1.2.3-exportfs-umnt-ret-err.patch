@@ -1,0 +1,23 @@
+diff -up nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig nfs-utils-1.2.3/utils/exportfs/exportfs.c
+--- nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig	2016-12-09 11:04:49.442364729 -0500
++++ nfs-utils-1.2.3/utils/exportfs/exportfs.c	2016-12-09 11:26:50.185857355 -0500
+@@ -369,6 +369,7 @@ unexportfs_parsed(char *hname, char *pat
+ 	nfs_export	*exp;
+ 	struct addrinfo *ai = NULL;
+ 	int		htype;
++	int     success = 0;
+ 
+ 	if ((htype = client_gettype(hname)) == MCL_FQDN) {
+ 		ai = host_addrinfo(hname);
+@@ -416,6 +417,11 @@ unexportfs_parsed(char *hname, char *pat
+ #endif
+ 		exp->m_xtabent = 0;
+ 		exp->m_mayexport = 0;
++		success = 1;
++	}
++	if (!success) {
++		xlog(L_ERROR, "Could not find '%s:%s' to unexport.", hname, path);
++		export_errno = 1;
+ 	}
+ 
+ 	freeaddrinfo(ai);

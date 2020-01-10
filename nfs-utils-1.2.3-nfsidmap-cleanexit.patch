@@ -1,0 +1,124 @@
+commit 7af2472c0876bdaf31c227b5f238c824399e9d32
+Author: Steve Dickson <steved@redhat.com>
+Date:   Mon Jun 27 10:08:26 2016 -0400
+
+    nfsidmap: Clean up other exit status cases
+    
+    Make it unambiguous where 0 or 1 represent an exit status.
+    
+    Signed-off-by: Chuck Lever <chuck.lever@oracle.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/nfsidmap/nfsidmap.c b/utils/nfsidmap/nfsidmap.c
+index 193d73b..17e680c 100644
+--- a/utils/nfsidmap/nfsidmap.c
++++ b/utils/nfsidmap/nfsidmap.c
+@@ -153,7 +153,7 @@ static int keyring_clear(char *keyring)
+ 
+ 	if ((fp = fopen(PROCKEYS, "r")) == NULL) {
+ 		xlog_err("fopen(%s) failed: %m", PROCKEYS);
+-		return 1;
++		return EXIT_FAILURE;
+ 	}
+ 
+ 	while(fgets(buf, BUFSIZ, fp) != NULL) {
+@@ -175,7 +175,7 @@ static int keyring_clear(char *keyring)
+ 		if (keyctl_clear(key) < 0) {
+ 			xlog_err("keyctl_clear(0x%x) failed: %m", key);
+ 			fclose(fp);
+-			return 1;
++			return EXIT_FAILURE;
+ 		}
+ 		fclose(fp);
+ 		/*
+@@ -183,12 +183,12 @@ static int keyring_clear(char *keyring)
+ 		 */
+ 		if (!strstr(keyring, DEFAULT_KEYRING":"))
+ 			keyctl_revoke(key);
+-		return 0;
++		return EXIT_SUCCESS;
+ 	}
+ 	if (strstr(keyring, DEFAULT_KEYRING":"))
+ 		xlog_err("'%s' keyring was not found.", keyring);
+ 	fclose(fp);
+-	return 1;
++	return EXIT_FAILURE;
+ }
+ /*
+  * Revoke a key 
+@@ -204,7 +204,7 @@ static int key_revoke(char *keystr, int keymask)
+ 
+ 	if ((fp = fopen(PROCKEYS, "r")) == NULL) {
+ 		xlog_err("fopen(%s) failed: %m", PROCKEYS);
+-		return 1;
++		return EXIT_FAILURE;
+ 	}
+ 
+ 	while(fgets(buf, BUFSIZ, fp) != NULL) {
+@@ -238,18 +238,18 @@ static int key_revoke(char *keystr, int keymask)
+ 		if (keyctl_revoke(key) < 0) {
+ 			xlog_err("keyctl_revoke(0x%x) failed: %m", key);
+ 			fclose(fp);
+-			return 1;
++			return EXIT_FAILURE;
+ 		}
+ 
+ 		keymask &= ~mask;
+ 		if (keymask == 0) {
+ 			fclose(fp);
+-			return 0;
++			return EXIT_SUCCESS;
+ 		}
+ 	}
+ 	xlog_err("'%s' key was not found.", keystr);
+ 	fclose(fp);
+-	return 1;
++	return EXIT_FAILURE;
+ }
+ 
+ int main(int argc, char **argv)
+@@ -307,7 +307,7 @@ int main(int argc, char **argv)
+ 
+ 	if ((rc = nfs4_init_name_mapping(PATH_IDMAPDCONF))) {
+ 		xlog_errno(rc, "Unable to create name to user id mappings.");
+-		return 1;
++		return EXIT_FAILURE;
+ 	}
+ 	if (!verbose)
+ 		verbose = conf_get_num("General", "Verbosity", 0);
+@@ -335,7 +335,7 @@ int main(int argc, char **argv)
+ 	if ((argc - optind) != 2) {
+ 		xlog_warn("Bad arg count. Check /etc/request-key.conf");
+ 		xlog_warn(usage, progname);
+-		return 1;
++		return EXIT_FAILURE;
+ 	}
+ 
+ 	if (verbose)
+@@ -346,13 +346,14 @@ int main(int argc, char **argv)
+ 	arg = strdup(argv[optind]);
+ 	if (arg == NULL) {
+ 		xlog_err("strdup failed: %m");
+-		return 1;
++		return EXIT_FAILURE;
+ 	}
+ 	type = strtok(arg, ":");
+ 	value = strtok(NULL, ":");
+-    if (value == NULL) {
++	if (value == NULL) {
++		free(arg);
+ 		xlog_err("Error: Null uid/gid value.");
+-		return 1;
++		return EXIT_FAILURE;
+ 	}
+ 	if (verbose) {
+ 		xlog_warn("key: 0x%lx type: %s value: %s timeout %ld",
+@@ -398,7 +399,7 @@ int main(int argc, char **argv)
+ 		keyctl_unlink(key, parent_keyring);
+ 
+ 	/* Set timeout to 10 (600 seconds) minutes */
+-	if (rc == 0)
++	if (rc == EXIT_SUCCESS)
+ 		keyctl_set_timeout(key, timeout);
+ 
+ 	free(arg);

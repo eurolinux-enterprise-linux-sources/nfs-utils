@@ -1,0 +1,21 @@
+commit c6210c5fc52eb71bde0dec2c661066b77a9844e0
+Author: Steve Dickson <steved@redhat.com>
+Date:   Mon Jan 20 12:45:52 2014 -0500
+
+    mount.nfs: Removed supported flag from usage string
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/mount.c b/utils/mount/mount.c
+index c07775b..14fd383 100644
+--- a/utils/mount/mount.c
++++ b/utils/mount/mount.c
+@@ -329,7 +329,7 @@ static int add_mtab(char *spec, char *mount_point, char *fstype,
+ 
+ static void mount_usage(void)
+ {
+-	printf(_("usage: %s remotetarget dir [-rvVwfnsih] [-o nfsoptions]\n"),
++	printf(_("usage: %s remotetarget dir [-rvVwfnsh] [-o nfsoptions]\n"),
+ 		progname);
+ 	printf(_("options:\n"));
+ 	printf(_("\t-r\t\tMount file system readonly\n"));

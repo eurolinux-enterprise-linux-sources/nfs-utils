@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.2.3
-Release: 70%{?dist}.2
+Release: 75%{?dist}
 Epoch: 1
 
 Source0: http://www.kernel.org/pub/linux/utils/nfs/%{name}-%{version}.tar.bz2
@@ -156,12 +156,20 @@ Patch113: nfs-utils-1.2.3-gssd-timeout.patch
 Patch114: nfs-utils-1.2.3-nfs_connect_nb.patch
 Patch115: nfs-utils-1.2.3-nfsidmap-update.patch
 #
-# RHEL6.8-z
-#
+# RHEL6.9
 Patch116: nfs-utils-1.2.3-mount-nonblocking.patch
-Patch117: nfs-utils-1.2.3-statd-warnings.patch
+Patch117: nfs-utils-1.2.3-nfsidmap-cleanexit.patch
 Patch118: nfs-utils-1.2.3-gssd-uppercase-fix.patch
-
+Patch119: nfs-utils-1.2.3-mount-manpage-update.patch
+Patch120: nfs-utils-1.2.3-statd-warnings.patch
+Patch121: nfs-utils-1.2.3-mountd-root-crossmnt.patch
+Patch122: nfs-utils-1.2.3-mount-exitval.patch
+Patch123: nfs-utils-1.2.3-mount-usage.patch
+Patch124: nfs-utils-1.2.3-mount-manpage-alias.patch 
+Patch125: nfs-utils-1.2.3-exportfs-slashes.patch
+Patch126: nfs-utils-1.2.3-mount-eopnotsupp.patch
+Patch127: nfs-utils-1.2.3-exportfs-umnt-ret-err.patch
+Patch128: nfs-utils-1.2.3-mount-version.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1010: nfs-utils-1.2.2-statdpath.patch
@@ -453,12 +461,32 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch114 -p1
 # 1303877 - [6.8] regression: nfs idmap fail
 %patch115 -p1
-# 1350702 - Back port of bz 1163891 required as rpc.mountd can be...
+# 1301581 - Back port of bz 1163891 required as rpc.mountd can...
 %patch116 -p1
-# 1351259 - rpc.statd emits warnings like "Failed to delete: could not..
+# 1313603 - The Cppcheck Warnings in Coverity Scan test of RHBA-2015:22275-04
 %patch117 -p1
-# 1363837 - cthon - rpc.gssd crash reading krb5.keytab in find_keytab_entry()
+# 1313090 - cthon - rpc.gssd crash reading krb5.keytab in find_keytab_entry()
 %patch118 -p1
+# 1302981 - man pages nfs/mount.fs should mention /etc/nfsmount.conf...
+%patch119 -p1
+# 1347027 - rpc.statd emits warnings like "Failed to delete: could not...
+%patch120 -p1
+# 1331207 - NFSv4 export of "/" doesn't respect "crossmnt" export option
+%patch121 -p1
+# 1208385 - mount.nfs with wrong option should return errno 1 but return 0
+%patch122 -p1
+# 1000990 - Undefined option -i in mount.nfs help usage info
+%patch123 -p1
+# 1037926 - [rpc.mountd] update rpc.mountd(8) manpage to change -P...
+%patch124 -p1
+# 1276538 - [exportfs] exportfs -u cannot unexport when the specified...
+%patch125 -p1
+# 1352856 - NFS fails to mount on boot if both client and server were...
+%patch126 -p1
+# 1276221 - exportfs -u always return 0 even if unexport failed actually 
+%patch127 -p1
+# 1404535 - nfs-utils: /bin/ls --color=auto takes very long on dir...
+%patch128 -p1
 
 %patch1000 -p1
 %patch1010 -p1
@@ -653,14 +681,29 @@ fi
 %attr(4755,root,root)   /sbin/umount.nfs4
 
 %changelog
-* Mon Aug 22 2016 Steve Dickson <steved@redhat.com> 1.2.3-70_8.2
-- gssd: Fix inner-loop variable reuse (bz 1363837)
+* Wed Dec 14 2016 Steve Dickson <steved@redhat.com> 1.2.3-75
+- Fixed regression with -V flag (bz 1404535)
 
-* Wed Jun 29 2016 Steve Dickson <steved@redhat.com> 1.2.3-70_8.1
-- statd: suppress a benign log message in nsm_delete_host() (bz 1351259)
+* Fri Dec  9 2016 Steve Dickson <steved@redhat.com> 1.2.3-74
+- exportfs: use correct exit code on failed umounts (bz 1276221)
 
-* Tue Jun 28 2016 Steve Dickson <steved@redhat.com> 1.2.3-70_8
-- rpc.mountd: set libtirpc nonblocking mode to avoid DO (bz 1350702)
+* Fri Oct 28 2016 Steve Dickson <steved@redhat.com> 1.2.3-73
+- mountd: fix is_subdirectory to understand '/' (bz 1331207)
+- mount.nfs: Fix for the bug in v1.2.4 that breaks mount.nfs (bz 1208385)
+- mount.nfs: Removed supported flag from usage string (bz 1000990)
+- mountd.man: Update to change -P option as an alias for -p (bz 1037926)
+- exportfs: Deal with path's trailing "/" in unexportfs_parsed() (bz 1276538)
+- mount: RPC_PROGNOTREGISTERED should not be a permanent error (bz 1352856)
+
+* Wed Jun 29 2016 Steve Dickson <steved@redhat.com> 1.2.3-72
+- statd: suppress a benign log message in nsm_delete_host() (bz 1347027)
+
+* Mon Jun 27 2016 Steve Dickson <steved@redhat.com> 1.2.3-71
+- rpc.mountd: set libtirpc nonblocking mode to avoid DO (bz 1301581)
+- nfsidmap: Clean up other exit status cases (bz 1313603)
+- gssd: Fix inner-loop variable reuse (bz 1313090)
+- mount.nfs manpage: Add nfsmount.conf (bz 1302981)
+- nfs.init: Set exit code on restarts (bz 1205055)
 
 * Sat Feb 13 2016 Steve Dickson <steved@redhat.com> 1.2.3-70
 - Fixed a regression introduced by a kernel change (bz 1303877)

@@ -1,0 +1,27 @@
+commit b97373cf6d830f7234a512e55679dbeca26d48ce
+Author: Yongcheng Yang <yongcheng.yang@gmail.com>
+Date:   Wed Mar 16 12:15:32 2016 -0400
+
+    mountd.man: Update to change -P option as an alias for -p
+    
+    From: Yongcheng Yang <yongcheng.yang@gmail.com>
+    
+    Signed-off-by: Yongcheng Yang <yongcheng.yang@gmail.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mountd/mountd.man b/utils/mountd/mountd.man
+index 53fc8b5..3cbd2a0 100644
+--- a/utils/mountd/mountd.man
++++ b/utils/mountd/mountd.man
+@@ -115,10 +115,7 @@ must be invoked with the option
+ .B \-n " or " \-\-no-tcp
+ Don't advertise TCP for mount.
+ .TP
+-.B \-P
+-Ignored (compatibility with unfsd??).
+-.TP
+-.B \-p num " or " \-\-port num
++.B \-p num " or " \-P num " or " \-\-port num
+ Specifies the port number used for RPC listener sockets.
+ If this option is not specified,
+ .B rpc.mountd
