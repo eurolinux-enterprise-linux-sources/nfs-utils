@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.2.3
-Release: 75%{?dist}
+Release: 78%{?dist}
 Epoch: 1
 
 Source0: http://www.kernel.org/pub/linux/utils/nfs/%{name}-%{version}.tar.bz2
@@ -172,9 +172,11 @@ Patch126: nfs-utils-1.2.3-mount-eopnotsupp.patch
 Patch127: nfs-utils-1.2.3-exportfs-umnt-ret-err.patch
 Patch128: nfs-utils-1.2.3-mount-version.patch
 #
-# RHEL6.9-Z
+# RHEL6.10
 #
 Patch129: nfs-utils-1.2.3-export-longpath.patch
+Patch130: nfs-utils-1.2.3-exportfs-parsed.patch
+Patch131: nfs-utils-1.2.3-mount-secureflgs.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1010: nfs-utils-1.2.2-statdpath.patch
@@ -492,8 +494,12 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch127 -p1
 # 1404535 - nfs-utils: /bin/ls --color=auto takes very long on dir...
 %patch128 -p1
-# 1500920 - exportfs segfault due to incorrect sign in export_hash...
+# 1489617 - exportfs segfault due to incorrect sign in export_hash function 
 %patch129 -p1
+# 1500159 - unexportfs_parsed() matched path too eagerly
+%patch130 -p1
+# 1443579 - NFS user mounts do not enforce 'noexec' 
+%patch131 -p1
 
 %patch1000 -p1
 %patch1010 -p1
@@ -688,8 +694,14 @@ fi
 %attr(4755,root,root)   /sbin/umount.nfs4
 
 %changelog
-* Mon Oct 16 2017 Steve Dickson <steved@redhat.com> 1.2.3-75_9
-- Exportfs crashes with long path (bz 1500920)
+* Thu Apr  5 2018 Steve Dickson <steved@redhat.com> 1.2.3-78
+-  mount.nfs: On user mounts set the secure mount flag (bz 1443579)
+
+* Mon Dec 11 2017 Steve Dickson <steved@redhat.com> 1.2.3-77
+- exportfs: fix path comparison in unexportfs_parsed() (bz 1500159)
+
+* Fri Oct  6 2017 Steve Dickson <steved@redhat.com> 1.2.3-76
+- Exportfs crashes with long path (bz 1489617)
 
 * Wed Dec 14 2016 Steve Dickson <steved@redhat.com> 1.2.3-75
 - Fixed regression with -V flag (bz 1404535)
