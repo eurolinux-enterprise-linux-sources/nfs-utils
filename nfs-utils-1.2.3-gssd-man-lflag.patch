@@ -1,0 +1,58 @@
+commit 16f151834e63d8df9f852b7e265f17c689553c35
+Author: Michael Weiser <weiser@science-computing.de>
+Date:   Mon Apr 16 06:49:21 2012 -0400
+
+    Add -l option to gssd to force legacy behaviour
+    
+    Implement a new option -l to force gssd to ignore its kernel's crypto
+    capabilities and use just the Single DES legacy encryption types to be
+    compatible with old servers. This is only relevant if those servers have
+    strong keys in their keytab.
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+    Tested-by: Michael Weiser <weiser@science-computing.de>
+
+diff --git a/utils/gssd/gssd.man b/utils/gssd/gssd.man
+index 073379d..d8138fa 100644
+--- a/utils/gssd/gssd.man
++++ b/utils/gssd/gssd.man
+@@ -6,7 +6,7 @@
+ .SH NAME
+ rpc.gssd \- rpcsec_gss daemon
+ .SH SYNOPSIS
+-.B "rpc.gssd [-f] [-n] [-k keytab] [-p pipefsdir] [-v] [-r] [-d ccachedir]"
++.B "rpc.gssd [-f] [-n] [-k keytab] [-l] [-p pipefsdir] [-v] [-r] [-d ccachedir]"
+ .SH DESCRIPTION
+ The rpcsec_gss protocol gives a means of using the gss-api generic security
+ api to provide security for protocols using rpc (in particular, nfs).  Before
+@@ -70,6 +70,30 @@ for "machine credentials" is now:
+ If this search order does not use the correct key then provide a
+ keytab file that contains only correct keys.
+ .TP
++.B -l
++Tells
++.B rpc.gssd
++to limit session keys to Single DES even if the kernel supports stronger
++encryption types. Service ticket encryption is still governed by what
++the KDC believes the target server supports. This way the client can
++access a server that has strong keys in its keytab for ticket decryption
++but whose kernel only supports Single DES.
++.IP
++The alternative is to put only Single DES keys in the server's keytab
++and limit encryption types for its principal to Single DES on the KDC
++which will cause service tickets for this server to be encrypted using
++only Single DES and (as a side-effect) contain only Single DES session
++keys.
++.IP
++This legacy behaviour is only required for older servers
++(pre nfs-utils-1.2.4). If the server has a recent kernel, Kerberos
++implementation and nfs-utils it will work just fine with stronger
++encryption.
++.IP
++.B Note:
++This option is only available with Kerberos libraries that 
++support setable encryption types.
++.TP
+ .B -p path
+ Tells
+ .B rpc.gssd

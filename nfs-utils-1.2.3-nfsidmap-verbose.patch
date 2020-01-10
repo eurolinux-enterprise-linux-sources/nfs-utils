@@ -1,0 +1,36 @@
+diff -up nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c.orig nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c
+--- nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c.orig	2012-07-05 08:29:33.000000000 -0400
++++ nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c	2012-07-05 10:50:32.000000000 -0400
+@@ -12,6 +12,7 @@
+ 
+ #include <unistd.h>
+ #include "xlog.h"
++#include "conffile.h"
+ 
+ int verbose = 0;
+ char *usage="Usage: %s [-v] [-c || [-u|-g|-r key] || [-t timeout] key desc]";
+@@ -26,6 +27,10 @@ char *usage="Usage: %s [-v] [-c || [-u|-
+ #define DEFAULT_KEYRING "id_resolver"
+ #endif
+ 
++#ifndef PATH_IDMAPDCONF
++#define PATH_IDMAPDCONF "/etc/idmapd.conf"
++#endif
++
+ static int keyring_clear(char *keyring);
+ 
+ #define UIDKEYS 0x1
+@@ -267,6 +272,13 @@ int main(int argc, char **argv)
+ 		}
+ 	}
+ 
++	if (nfs4_init_name_mapping(PATH_IDMAPDCONF)) {
++		xlog_err("Unable to create name to user id mappings.");
++		return 1;
++	}
++	if (!verbose)
++		verbose = conf_get_num("General", "Verbosity", 0);
++
+ 	if (keystr) {
+ 		rc = key_revoke(keystr, keymask);
+ 		return rc;		

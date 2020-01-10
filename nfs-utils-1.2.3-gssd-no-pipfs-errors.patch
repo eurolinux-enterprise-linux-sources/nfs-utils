@@ -1,0 +1,15 @@
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig nfs-utils-1.2.3/utils/gssd/gssd_proc.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig	2015-12-02 08:59:26.076463799 -0500
++++ nfs-utils-1.2.3/utils/gssd/gssd_proc.c	2015-12-02 09:05:01.991202276 -0500
+@@ -434,8 +434,9 @@ process_clnt_dir(char *dir, char *pdir)
+ 	}
+ 	sprintf(clp->dirname, "%s/%s", pdir, dir);
+ 	if ((clp->dir_fd = open(clp->dirname, O_RDONLY)) == -1) {
+-		printerr(0, "ERROR: can't open %s: %s\n",
+-			 clp->dirname, strerror(errno));
++		if (errno != ENOENT)
++			printerr(0, "ERROR: can't open %s: %s\n",
++				 clp->dirname, strerror(errno));
+ 		goto fail_destroy_client;
+ 	}
+ 	fcntl(clp->dir_fd, F_SETSIG, DNOTIFY_SIGNAL);

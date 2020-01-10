@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig nfs-utils-1.2.3/utils/exportfs/exportfs.c
+--- nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig	2014-08-25 12:49:47.874578324 -0400
++++ nfs-utils-1.2.3/utils/exportfs/exportfs.c	2014-08-25 12:52:59.227578318 -0400
+@@ -270,7 +270,7 @@ static void
+ exportfs_parsed(char *hname, char *path, char *options, int verbose)
+ {
+ 	struct exportent *eep;
+-	nfs_export	*exp;
++	nfs_export	*exp = NULL;
+ 	struct addrinfo	*ai = NULL;
+ 	int		htype;
+ 

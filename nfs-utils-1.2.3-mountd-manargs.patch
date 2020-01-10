@@ -1,0 +1,56 @@
+diff -up nfs-utils-1.2.3/utils/mountd/mountd.man.orig nfs-utils-1.2.3/utils/mountd/mountd.man
+--- nfs-utils-1.2.3/utils/mountd/mountd.man.orig	2014-06-17 14:07:32.401556000 -0400
++++ nfs-utils-1.2.3/utils/mountd/mountd.man	2014-06-17 14:20:01.521725000 -0400
+@@ -86,7 +86,7 @@ Turn on debugging. Valid kinds are: all,
+ .B \-F " or " \-\-foreground
+ Run in foreground (do not daemonize)
+ .TP
+-.B \-f " or " \-\-exports-file
++.B \-f export-file " or " \-\-exports-file export-file
+ This option specifies the exports file, listing the clients that this
+ server is prepared to serve and parameters to apply to each
+ such mount (see
+@@ -101,7 +101,7 @@ Display usage message.
+ Set the limit of the number of open file descriptors to num. The
+ default is to leave the limit unchanged.
+ .TP
+-.B \-N " or " \-\-no-nfs-version
++.B \-N mountd-version " or " \-\-no-nfs-version mountd-version
+ This option can be used to request that
+ .B rpc.mountd
+ do not offer certain versions of NFS. The current version of
+@@ -118,7 +118,7 @@ Don't advertise TCP for mount.
+ .B \-P
+ Ignored (compatibility with unfsd??).
+ .TP
+-.B \-p " or " \-\-port num
++.B \-p num " or " \-\-port num
+ Specifies the port number used for RPC listener sockets.
+ If this option is not specified,
+ .B rpc.mountd
+@@ -129,7 +129,7 @@ This option can be used to fix the port 
+ listeners when NFS MOUNT requests must traverse a firewall
+ between clients and servers.
+ .TP
+-.B \-H " or " \-\-ha-callout prog
++.B \-H " prog or " \-\-ha-callout prog
+ Specify a high availability callout program.
+ This program receives callouts for all MOUNT and UNMOUNT requests.
+ This allows
+@@ -171,14 +171,14 @@ to perform a reverse lookup on each IP a
+ Enabling this can have a substantial negative effect on performance
+ in some situations.
+ .TP
+-.BR "\-t N" " or " "\-\-num\-threads=N"
++.BR "\-t N" " or " "\-\-num\-threads=N" or " \-\-num\-threads N"
+ This option specifies the number of worker threads that rpc.mountd
+ spawns.  The default is 1 thread, which is probably enough.  More
+ threads are usually only needed for NFS servers which need to handle
+ mount storms of hundreds of NFS mounts in a few seconds, or when
+ your DNS server is slow or unreliable.
+ .TP
+-.B \-V " or " \-\-nfs-version
++.B \-V version " or " \-\-nfs-version version
+ This option can be used to request that
+ .B rpc.mountd
+ offer certain versions of NFS. The current version of

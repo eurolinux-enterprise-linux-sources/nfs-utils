@@ -1,0 +1,37 @@
+commit bf66c9facb8e4798c79e1286e3da2dcafeed83fb
+Author: Steve Dickson <steved@redhat.com>
+Date:   Tue May 1 15:34:34 2012 -0400
+
+    mounts.nfs: v2 and v3 background mounts should retry when server is down.
+    
+    The point of background mounts is to have the mount
+    retried if the mount fails. This patch allows the v2/v3
+    background mount to proceed in the case when the server
+    is down by not making EOPNOTSUPP a permanent error.
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/stropts.c b/utils/mount/stropts.c
+index d52e21a..e09aa7c 100644
+--- a/utils/mount/stropts.c
++++ b/utils/mount/stropts.c
+@@ -911,7 +911,8 @@ static int nfsmount_parent(struct nfsmount_info *mi)
+ 	if (nfs_try_mount(mi))
+ 		return EX_SUCCESS;
+ 
+-	if (nfs_is_permanent_error(errno)) {
++	/* retry background mounts when the server is not up */
++	if (nfs_is_permanent_error(errno) && errno != EOPNOTSUPP) {
+ 		mount_error(mi->spec, mi->node, errno);
+ 		return EX_FAIL;
+ 	}
+@@ -946,7 +947,8 @@ static int nfsmount_child(struct nfsmount_info *mi)
+ 		if (nfs_try_mount(mi))
+ 			return EX_SUCCESS;
+ 
+-		if (nfs_is_permanent_error(errno))
++		/* retry background mounts when the server is not up */
++		if (nfs_is_permanent_error(errno) && errno != EOPNOTSUPP)
+ 			break;
+ 
+ 		if (time(NULL) > timeout)

@@ -1,0 +1,44 @@
+diff -up nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c.orig nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c
+--- nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c.orig	2016-02-13 08:03:18.666224302 -0500
++++ nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c	2016-02-13 08:04:07.805209924 -0500
+@@ -323,7 +323,7 @@ int main(int argc, char **argv)
+ 		xlog_syslog(0);
+ 		i = 1;
+ 		for(i = 1; i < MAX_KEYS; i++) {
+-			snprintf(child_name, sizeof(child_name), DEFAULT_KEYRING "_child_%d", i);
++			snprintf(child_name, sizeof(child_name), "_child_%d", i);
+ 			keyring_clear(child_name);
+ 		}
+ 
+@@ -331,9 +331,9 @@ int main(int argc, char **argv)
+ 		return rc;		
+ 	}
+ 
+-	xlog_stderr(0);
++	xlog_stderr(verbose);
+ 	if ((argc - optind) != 2) {
+-		xlog_err("Bad arg count. Check /etc/request-key.conf");
++		xlog_warn("Bad arg count. Check /etc/request-key.conf");
+ 		xlog_warn(usage, progname);
+ 		return 1;
+ 	}
+@@ -360,15 +360,17 @@ int main(int argc, char **argv)
+ 	}
+ 
+ 	parent_keyring = request_key("keyring", DEFAULT_KEYRING, NULL, KEY_SPEC_THREAD_KEYRING);
++	if (parent_keyring < 0)
++		xlog_warn("request_keying parent key %s failed: %m", DEFAULT_KEYRING);
+ 
+ 	for (i = 1; i < MAX_KEYS; i++) {
+-		snprintf(child_name, sizeof(child_name), DEFAULT_KEYRING "_child_%d", i);
++		snprintf(child_name, sizeof(child_name),  "_child_%d", i);
+ 
+ 		child_keyring = keyctl_search(parent_keyring, "keyring", child_name, 0);
+ 		if (child_keyring < 0) {
+ 			child_keyring = add_key("keyring", child_name, NULL, 0, parent_keyring);
+ 			if (verbose)
+-				xlog_warn("adding new child %s: %m", child_name);
++				xlog_warn("adding new child %s", child_name);
+ 
+ 			if (child_keyring < 0)
+ 				xlog_err("Failed to add child keyring: %m");

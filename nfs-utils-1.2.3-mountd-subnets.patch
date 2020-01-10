@@ -1,0 +1,47 @@
+commit 8a5da2b392bc25feb58a9de11cac411f5f8473bb
+Author: NeilBrown <neilb@suse.de>
+Date:   Thu Oct 24 15:58:45 2013 -0400
+
+    Stop Treat IP addresses a FQDN rather than SUBNETs.
+    
+    I think there was a reason for this many years ago,
+    but I can not find any evidence that it ever really did
+    anything useful and it certainly doesn't seem to now.
+    
+    And the documentation suggests that IP address take precedence over
+    SUBNETs, and that can only happen if they are treated as MCL_FQDN.
+    
+    So remove this apparently pointless code.
+    
+    Reported-and-tested-by: Wangminlan <wangminlan@huawei.com>
+    Signed-off-by: NeilBrown <neilb@suse.de>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/support/export/client.c b/support/export/client.c
+index ba2db8f..dbf47b9 100644
+--- a/support/export/client.c
++++ b/support/export/client.c
+@@ -745,7 +745,6 @@ client_check(const nfs_client *clp, const struct addrinfo *ai)
+ int
+ client_gettype(char *ident)
+ {
+-	struct addrinfo *ai;
+ 	char *sp;
+ 
+ 	if (ident[0] == '\0' || strcmp(ident, "*")==0)
+@@ -767,15 +766,5 @@ client_gettype(char *ident)
+ 			sp++;
+ 	}
+ 
+-	/*
+-	 * Treat unadorned IP addresses as MCL_SUBNETWORK.
+-	 * Everything else is MCL_FQDN.
+-	 */
+-	ai = host_pton(ident);
+-	if (ai != NULL) {
+-		freeaddrinfo(ai);
+-		return MCL_SUBNETWORK;
+-	}
+-
+ 	return MCL_FQDN;
+ }

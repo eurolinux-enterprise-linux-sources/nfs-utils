@@ -1,0 +1,203 @@
+diff -up nfs-utils-1.2.3/aclocal/ipv6.m4.save nfs-utils-1.2.3/aclocal/ipv6.m4
+--- nfs-utils-1.2.3/aclocal/ipv6.m4.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/aclocal/ipv6.m4	2012-02-29 10:43:50.000000000 -0500
+@@ -15,9 +15,12 @@ AC_DEFUN([AC_IPV6], [
+     fi
+ 
+     dnl IPv6-enabled networking functions required for IPv6
+-    AC_CHECK_FUNCS([getifaddrs getnameinfo bindresvport_sa], ,
++    AC_CHECK_FUNCS([getifaddrs getnameinfo], ,
+                    [AC_MSG_ERROR([Missing library functions needed for IPv6.])])
+ 
++	AC_CHECK_LIB([tirpc], [bindresvport_sa], [:],
++		[AC_MSG_ERROR([Missing library functions needed for IPv6.])])
++
+     dnl Need to detect presence of IPv6 networking at run time via
+     dnl getaddrinfo(3); old versions of glibc do not support ADDRCONFIG
+     AC_CHECK_DECL([AI_ADDRCONFIG], ,
+diff -up nfs-utils-1.2.3/aclocal/libevent.m4.save nfs-utils-1.2.3/aclocal/libevent.m4
+--- nfs-utils-1.2.3/aclocal/libevent.m4.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/aclocal/libevent.m4	2012-02-29 10:35:48.000000000 -0500
+@@ -2,8 +2,9 @@ dnl Checks for libevent
+ AC_DEFUN([AC_LIBEVENT], [
+ 
+   dnl Check for libevent, but do not add -levent to LIBS
+-  AC_CHECK_LIB([event], [event_dispatch], [libevent=1],
++  AC_CHECK_LIB([event], [event_dispatch], [LIBEVENT=-levent],
+                [AC_MSG_ERROR([libevent not found.])])
++  AC_SUBST(LIBEVENT)
+ 
+   AC_CHECK_HEADERS([event.h], ,
+                    [AC_MSG_ERROR([libevent headers not found.])])
+diff -up nfs-utils-1.2.3/aclocal/libnfsidmap.m4.save nfs-utils-1.2.3/aclocal/libnfsidmap.m4
+--- nfs-utils-1.2.3/aclocal/libnfsidmap.m4.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/aclocal/libnfsidmap.m4	2012-02-29 10:42:15.000000000 -0500
+@@ -3,7 +3,7 @@ dnl
+ AC_DEFUN([AC_LIBNFSIDMAP], [
+ 
+   dnl Check for libnfsidmap, but do not add -lnfsidmap to LIBS
+-  AC_CHECK_LIB([nfsidmap], [nfs4_init_name_mapping], [libnfsidmap=1],
++  AC_CHECK_LIB([nfsidmap], [nfs4_init_name_mapping], [LIBNFSIDMAP=-lnfsidmap],
+                [AC_MSG_ERROR([libnfsidmap not found.])])
+ 
+   AC_CHECK_HEADERS([nfsidmap.h], ,
+@@ -18,4 +18,6 @@ AC_DEFUN([AC_LIBNFSIDMAP], [
+   AC_CHECK_LIB([nfsidmap], [nfs4_owner_to_uid], [enable_nfsidmap=yes],
+                [enable_nfsidmap=no])
+ 
++  AC_SUBST(LIBNFSIDMAP)
++
+ ])dnl
+diff -up nfs-utils-1.2.3/aclocal/libtirpc.m4.save nfs-utils-1.2.3/aclocal/libtirpc.m4
+--- nfs-utils-1.2.3/aclocal/libtirpc.m4.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/aclocal/libtirpc.m4	2012-02-29 10:42:51.000000000 -0500
+@@ -13,8 +13,8 @@ AC_DEFUN([AC_LIBTIRPC], [
+ 
+   if test "$enable_tirpc" != "no"; then
+ 
+-    dnl look for the library; add to LIBS if found
+-    AC_CHECK_LIB([tirpc], [clnt_tli_create], ,
++    dnl look for the library
++    AC_CHECK_LIB([tirpc], [clnt_tli_create], [:],
+                  [if test "$enable_tirpc" = "yes"; then
+ 			AC_MSG_ERROR([libtirpc not found.])
+ 		  else
+@@ -37,4 +37,15 @@ AC_DEFUN([AC_LIBTIRPC], [
+ 
+   fi
+ 
++  dnl now set $LIBTIRPC accordingly
++  if test "$enable_tirpc" != "no"; then
++    AC_DEFINE([HAVE_LIBTIRPC], 1,
++              [Define to 1 if you have and wish to use libtirpc.])
++    LIBTIRPC="-ltirpc"
++  else
++    LIBTIRPC=""
++  fi
++
++  AC_SUBST(LIBTIRPC)
++
+ ])dnl
+diff -up nfs-utils-1.2.3/tools/rpcgen/Makefile.am.save nfs-utils-1.2.3/tools/rpcgen/Makefile.am
+--- nfs-utils-1.2.3/tools/rpcgen/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/tools/rpcgen/Makefile.am	2012-02-29 10:42:51.000000000 -0500
+@@ -12,6 +12,7 @@ rpcgen_SOURCES = rpc_clntout.c rpc_cout.
+ rpcgen_CFLAGS=$(CFLAGS_FOR_BUILD)
+ rpcgen_CPPLAGS=$(CPPFLAGS_FOR_BUILD)
+ rpcgen_LDFLAGS=$(LDFLAGS_FOR_BUILD)
++rpcgen_LDADD=$(LIBTIRPC)
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+ 
+diff -up nfs-utils-1.2.3/utils/gssd/Makefile.am.save nfs-utils-1.2.3/utils/gssd/Makefile.am
+--- nfs-utils-1.2.3/utils/gssd/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/gssd/Makefile.am	2012-02-29 10:42:51.000000000 -0500
+@@ -40,7 +40,7 @@ gssd_SOURCES = \
+ 
+ gssd_LDADD =	../../support/nfs/libnfs.a \
+ 		$(RPCSECGSS_LIBS) $(GSSGLUE_LIBS) $(KRBLIBS)
+-gssd_LDFLAGS = $(KRBLDFLAGS)
++gssd_LDFLAGS = $(KRBLDFLAGS) $(LIBTIRPC)
+ 
+ gssd_CFLAGS = $(AM_CFLAGS) $(CFLAGS) \
+ 	      $(RPCSECGSS_CFLAGS) $(GSSGLUE_CFLAGS) $(KRBCFLAGS)
+@@ -56,8 +56,8 @@ svcgssd_SOURCES = \
+ 
+ svcgssd_LDADD = \
+ 	../../support/nfs/libnfs.a \
+-	$(RPCSECGSS_LIBS) $(GSSGLUE_LIBS) -lnfsidmap \
+-	$(KRBLIBS)
++	$(RPCSECGSS_LIBS) $(GSSGLUE_LIBS) $(LIBNFSIDMAP) \
++	$(KRBLIBS) $(LIBTIRPC)
+ 
+ svcgssd_LDFLAGS = $(KRBLDFLAGS)
+ 
+diff -up nfs-utils-1.2.3/utils/idmapd/Makefile.am.save nfs-utils-1.2.3/utils/idmapd/Makefile.am
+--- nfs-utils-1.2.3/utils/idmapd/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/idmapd/Makefile.am	2012-02-29 10:37:07.000000000 -0500
+@@ -16,7 +16,7 @@ idmapd_SOURCES = \
+ 	nfs_idmap.h \
+ 	queue.h
+ 
+-idmapd_LDADD = -levent -lnfsidmap ../../support/nfs/libnfs.a
++idmapd_LDADD = $(LIBEVENT) $(LIBNFSIDMAP) ../../support/nfs/libnfs.a
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+ 
+diff -up nfs-utils-1.2.3/utils/mountd/Makefile.am.save nfs-utils-1.2.3/utils/mountd/Makefile.am
+--- nfs-utils-1.2.3/utils/mountd/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/mountd/Makefile.am	2012-02-29 10:44:17.000000000 -0500
+@@ -12,7 +12,7 @@ mountd_SOURCES = mountd.c mount_dispatch
+ mountd_LDADD = ../../support/export/libexport.a \
+ 	       ../../support/nfs/libnfs.a \
+ 	       ../../support/misc/libmisc.a \
+-	       $(LIBBSD) $(LIBWRAP) $(LIBNSL) $(LIBBLKID)
++	       $(LIBBSD) $(LIBWRAP) $(LIBNSL) $(LIBBLKID) $(LIBTIRPC)
+ mountd_CPPFLAGS = $(AM_CPPFLAGS) $(CPPFLAGS) \
+ 		  -I$(top_builddir)/support/include \
+ 		  -I$(top_srcdir)/support/export
+diff -up nfs-utils-1.2.3/utils/mount/Makefile.am.save nfs-utils-1.2.3/utils/mount/Makefile.am
+--- nfs-utils-1.2.3/utils/mount/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/mount/Makefile.am	2012-02-29 10:42:51.000000000 -0500
+@@ -25,7 +25,8 @@ EXTRA_DIST += nfsmount.conf
+ endif
+ 
+ mount_nfs_LDADD = ../../support/nfs/libnfs.a \
+-		  ../../support/export/libexport.a
++		  ../../support/export/libexport.a \
++		  $(LIBTIRPC)
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+ 
+diff -up nfs-utils-1.2.3/utils/nfsd/Makefile.am.save nfs-utils-1.2.3/utils/nfsd/Makefile.am
+--- nfs-utils-1.2.3/utils/nfsd/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/nfsd/Makefile.am	2012-02-29 10:42:51.000000000 -0500
+@@ -8,7 +8,7 @@ KPREFIX		= @kprefix@
+ sbin_PROGRAMS	= nfsd
+ 
+ nfsd_SOURCES = nfsd.c nfssvc.c
+-nfsd_LDADD = ../../support/nfs/libnfs.a
++nfsd_LDADD = ../../support/nfs/libnfs.a $(LIBTIRPC)
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+ 
+diff -up nfs-utils-1.2.3/utils/nfsidmap/Makefile.am.save nfs-utils-1.2.3/utils/nfsidmap/Makefile.am
+--- nfs-utils-1.2.3/utils/nfsidmap/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/nfsidmap/Makefile.am	2012-02-29 10:37:07.000000000 -0500
+@@ -4,6 +4,6 @@ man8_MANS = nfsidmap.man
+ 
+ sbin_PROGRAMS	= nfsidmap
+ nfsidmap_SOURCES = nfsidmap.c
+-nfsidmap_LDADD = -lnfsidmap -lkeyutils ../../support/nfs/libnfs.a
++nfsidmap_LDADD = $(LIBNFSIDMAP) -lkeyutils ../../support/nfs/libnfs.a
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+diff -up nfs-utils-1.2.3/utils/showmount/Makefile.am.save nfs-utils-1.2.3/utils/showmount/Makefile.am
+--- nfs-utils-1.2.3/utils/showmount/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/showmount/Makefile.am	2012-02-29 10:42:51.000000000 -0500
+@@ -7,7 +7,8 @@ sbin_PROGRAMS	= showmount
+ showmount_SOURCES = showmount.c
+ showmount_LDADD = ../../support/export/libexport.a \
+ 		  ../../support/nfs/libnfs.a \
+-	  	  ../../support/misc/libmisc.a
++		  ../../support/misc/libmisc.a \
++		  $(LIBTIRPC)
+ showmount_CPPFLAGS = $(AM_CPPFLAGS) $(CPPFLAGS) \
+ 		   -I$(top_builddir)/support/export
+ 
+diff -up nfs-utils-1.2.3/utils/statd/Makefile.am.save nfs-utils-1.2.3/utils/statd/Makefile.am
+--- nfs-utils-1.2.3/utils/statd/Makefile.am.save	2012-02-29 10:35:33.000000000 -0500
++++ nfs-utils-1.2.3/utils/statd/Makefile.am	2012-02-29 10:42:51.000000000 -0500
+@@ -15,10 +15,10 @@ BUILT_SOURCES = $(GENFILES)
+ statd_LDADD = ../../support/nsm/libnsm.a \
+ 	      ../../support/nfs/libnfs.a \
+ 	      ../../support/misc/libmisc.a \
+-	      $(LIBWRAP) $(LIBNSL) $(LIBCAP)
++	      $(LIBWRAP) $(LIBNSL) $(LIBCAP) $(LIBTIRPC)
+ sm_notify_LDADD = ../../support/nsm/libnsm.a \
+ 		  ../../support/nfs/libnfs.a \
+-		  $(LIBNSL) $(LIBCAP)
++		  $(LIBNSL) $(LIBCAP) $(LIBTIRPC)
+ 
+ EXTRA_DIST = sim_sm_inter.x $(man8_MANS) COPYRIGHT simulate.c
+ 

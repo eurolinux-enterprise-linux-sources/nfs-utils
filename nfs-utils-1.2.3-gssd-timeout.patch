@@ -1,0 +1,105 @@
+diff -up nfs-utils-1.2.3/utils/gssd/gssd.c.orig nfs-utils-1.2.3/utils/gssd/gssd.c
+--- nfs-utils-1.2.3/utils/gssd/gssd.c.orig	2016-01-08 10:49:06.282297269 -0500
++++ nfs-utils-1.2.3/utils/gssd/gssd.c	2016-01-08 10:49:44.438063292 -0500
+@@ -64,6 +64,7 @@ char *ccachesearch[GSSD_MAX_CCACHE_SEARC
+ int  use_memcache = 0;
+ int  root_uses_machine_creds = 1;
+ unsigned int  context_timeout = 0;
++unsigned int  rpc_timeout = 5;
+ char *preferred_realm = NULL;
+ 
+ void
+@@ -103,9 +104,9 @@ main(int argc, char *argv[])
+ 	extern char *optarg;
+ 	char *progname;
+ #ifdef HAVE_SET_ALLOWABLE_ENCTYPES
+- 	const char *opts = "fvrmnMp:k:d:t:R:l";
++ 	const char *opts = "fvrmnMp:k:d:t:T:R:l";
+ #else
+- 	const char *opts = "fvrmnMp:k:d:t:R";
++ 	const char *opts = "fvrmnMp:k:d:t:T:R";
+ #endif
+ 
+ 	memset(ccachesearch, 0, sizeof(ccachesearch));
+@@ -147,6 +148,9 @@ main(int argc, char *argv[])
+ 			case 't':
+ 				context_timeout = atoi(optarg);
+ 				break;
++			case 'T':
++				rpc_timeout = atoi(optarg);
++				break;
+ 			case 'R':
+ 				preferred_realm = strdup(optarg);
+ 				break;
+diff -up nfs-utils-1.2.3/utils/gssd/gssd.h.orig nfs-utils-1.2.3/utils/gssd/gssd.h
+--- nfs-utils-1.2.3/utils/gssd/gssd.h.orig	2016-01-08 10:49:06.191295449 -0500
++++ nfs-utils-1.2.3/utils/gssd/gssd.h	2016-01-08 10:49:44.439063312 -0500
+@@ -65,6 +65,7 @@ extern char			*ccachesearch[];
+ extern int			use_memcache;
+ extern int			root_uses_machine_creds;
+ extern unsigned int 		context_timeout;
++extern unsigned int rpc_timeout;
+ extern char			*preferred_realm;
+ 
+ TAILQ_HEAD(clnt_list_head, clnt_info) clnt_list;
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c.orig nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c.orig	2016-01-08 10:49:06.211295849 -0500
++++ nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c	2016-01-08 11:20:09.544673982 -0500
+@@ -53,6 +53,7 @@
+ 
+ #include "gssd.h"
+ #include "err_util.h"
++#include "nfslib.h"
+ 
+ extern struct pollfd *pollarray;
+ extern int pollsize;
+@@ -61,7 +62,7 @@ extern int pollsize;
+ 
+ static volatile int dir_changed = 1;
+ 
+-static void dir_notify_handler(int sig, siginfo_t *si, void *data)
++static void dir_notify_handler(int UNUSED(sig), siginfo_t *UNUSED(si), void *UNUSED(data))
+ {
+ 	dir_changed = 1;
+ }
+diff -up nfs-utils-1.2.3/utils/gssd/gssd.man.orig nfs-utils-1.2.3/utils/gssd/gssd.man
+--- nfs-utils-1.2.3/utils/gssd/gssd.man.orig	2016-01-08 10:49:06.097293570 -0500
++++ nfs-utils-1.2.3/utils/gssd/gssd.man	2016-01-08 11:27:37.155653112 -0500
+@@ -130,6 +130,14 @@ new kernel contexts to be negotiated aft
+ seconds, which allows changing Kerberos tickets and identities frequently.
+ The default is no explicit timeout, which means the kernel context will live
+ the lifetime of the Kerberos service ticket used in its creation.
++.TP
++.B -T timeout
++Timeout, in seconds, to create an RPC connection with a server while
++establishing an authenticated gss context for a user.
++The default timeout is set to 5 seconds.
++If you get messages like "WARNING: can't create tcp rpc_clnt to server
++%servername% for user with uid %uid%: RPC: Remote system error -
++Connection timed out", you should consider an increase of this timeout.
+ .SH SEE ALSO
+ .BR rpc.svcgssd(8)
+ .SH AUTHORS
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig nfs-utils-1.2.3/utils/gssd/gssd_proc.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig	2016-01-08 10:49:06.249296609 -0500
++++ nfs-utils-1.2.3/utils/gssd/gssd_proc.c	2016-01-08 11:21:37.261433104 -0500
+@@ -798,7 +798,7 @@ int create_auth_rpc_client(struct clnt_i
+ 	OM_uint32		min_stat;
+ 	char			rpc_errmsg[1024];
+ 	int			protocol;
+-	struct timeval		timeout = {5, 0};
++	struct timeval	timeout;
+ 	struct sockaddr		*addr = (struct sockaddr *) &clp->addr;
+ 	socklen_t		salen;
+ 
+@@ -876,6 +876,10 @@ int create_auth_rpc_client(struct clnt_i
+ 	if (!populate_port(addr, salen, clp->prog, clp->vers, protocol))
+ 		goto out_fail;
+ 
++	/* set the timeout according to the requested valued */
++	timeout.tv_sec = (long) rpc_timeout;
++	timeout.tv_usec = (long) 0;
++
+ 	rpc_clnt = nfs_get_rpcclient(addr, salen, protocol, clp->prog,
+ 				     clp->vers, &timeout);
+ 	if (!rpc_clnt) {

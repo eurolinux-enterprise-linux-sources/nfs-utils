@@ -1,0 +1,391 @@
+diff --git a/utils/gssd/gssd.c b/utils/gssd/gssd.c
+index 0f2a295..dd5ff1b 100644
+--- a/utils/gssd/gssd.c
++++ b/utils/gssd/gssd.c
+@@ -55,6 +55,7 @@
+ #include "err_util.h"
+ #include "gss_util.h"
+ #include "krb5_util.h"
++#include "nfslib.h"
+ 
+ char pipefs_dir[PATH_MAX] = GSSD_PIPEFS_DIR;
+ char keytabfile[PATH_MAX] = GSSD_DEFAULT_KEYTAB_FILE;
+diff --git a/utils/gssd/svcgssd_krb5.c b/utils/gssd/svcgssd_krb5.c
+index b98c638..667469f 100644
+--- a/utils/gssd/svcgssd_krb5.c
++++ b/utils/gssd/svcgssd_krb5.c
+@@ -38,6 +38,7 @@
+ 
+ #include <stdio.h>
+ #include <errno.h>
++#include <ctype.h>
+ #include <gssapi/gssapi.h>
+ #include <krb5.h>
+ 
+diff --git a/utils/mountd/cache.c b/utils/mountd/cache.c
+index de31336..87aa98f 100644
+--- a/utils/mountd/cache.c
++++ b/utils/mountd/cache.c
+@@ -367,7 +367,7 @@ static char *next_mnt(void **v, char *p)
+ 	return me->mnt_dir;
+ }
+ 
+-struct addrinfo *lookup_client_addr(char *dom)
++static struct addrinfo *lookup_client_addr(char *dom)
+ {
+ 	struct addrinfo *ret;
+ 	struct addrinfo *tmp;
+@@ -381,75 +381,66 @@ struct addrinfo *lookup_client_addr(char *dom)
+ 	freeaddrinfo(tmp);
+ 	return ret;
+ }
+-
+-static void nfsd_fh(FILE *f)
++/* True iff e1 is a child of e2 and e2 has crossmnt set: */
++static bool subexport(struct exportent *e1, struct exportent *e2)
+ {
+-	/* request are:
+-	 *  domain fsidtype fsid
+-	 * interpret fsid, find export point and options, and write:
+-	 *  domain fsidtype fsid expiry path
+-	 */
+-	char *cp;
+-	char *dom;
+-	int fsidtype;
+-	int fsidlen;
+-	unsigned int dev, major=0, minor=0;
+-	unsigned int inode=0;
+-	unsigned long long inode64;
+-	unsigned int fsidnum=0;
+-	char fsid[32];
+-	struct exportent *found = NULL;
+-	struct addrinfo *ai = NULL;
+-	char *found_path = NULL;
+-	nfs_export *exp;
+-	int i;
+-	int dev_missing = 0;
+-	int uuidlen = 0;
+-	char *fhuuid = NULL;
++	char *p1 = e1->e_path, *p2 = e2->e_path;
++	int l2 = strlen(p2);
+ 
+-	if (readline(fileno(f), &lbuf, &lbuflen) != 1)
+-		return;
++	return e2->e_flags & NFSEXP_CROSSMOUNT
++	       && strncmp(p1, p2, l2) == 0
++	       && p1[l2] == '/';
++}
+ 
+-	xlog(D_CALL, "nfsd_fh: inbuf '%s'", lbuf);
++struct parsed_fsid {
++	int fsidtype;
++	/* We could use a union for this, but it would be more
++	 * complicated; why bother? */
++	uint64_t inode;
++	unsigned int minor;
++	unsigned int major;
++	uint32_t fsidnum;
++	size_t uuidlen;
++	char *fhuuid;
++};
+ 
+-	cp = lbuf;
+-	
+-	dom = malloc(strlen(cp));
+-	if (dom == NULL)
+-		return;
+-	if (qword_get(&cp, dom, strlen(cp)) <= 0)
+-		goto out;
+-	if (qword_get_int(&cp, &fsidtype) != 0)
+-		goto out;
+-	if (fsidtype < 0 || fsidtype > 7)
+-		goto out; /* unknown type */
+-	if ((fsidlen = qword_get(&cp, fsid, 32)) <= 0)
+-		goto out;
++static int parse_fsid(int fsidtype, int fsidlen, char *fsid,
++		struct parsed_fsid *parsed)
++{
++	uint32_t dev;
++	uint32_t inode32;
++
++	memset(parsed, 0, sizeof(*parsed));
++	parsed->fsidtype = fsidtype;
+ 	switch(fsidtype) {
+ 	case FSID_DEV: /* 4 bytes: 2 major, 2 minor, 4 inode */
+ 		if (fsidlen != 8)
+-			goto out;
++			return -1;
+ 		memcpy(&dev, fsid, 4);
+-		memcpy(&inode, fsid+4, 4);
+-		major = ntohl(dev)>>16;
+-		minor = ntohl(dev) & 0xFFFF;
++		memcpy(&inode32, fsid+4, 4);
++		parsed->inode = inode32;
++		parsed->major = ntohl(dev)>>16;
++		parsed->minor = ntohl(dev) & 0xFFFF;
+ 		break;
+ 
+ 	case FSID_NUM: /* 4 bytes - fsid */
+ 		if (fsidlen != 4)
+-			goto out;
+-		memcpy(&fsidnum, fsid, 4);
++			return -1;
++		memcpy(&parsed->fsidnum, fsid, 4);
+ 		break;
+ 
+-	case FSID_MAJOR_MINOR: /* 12 bytes: 4 major, 4 minor, 4 inode 
++	case FSID_MAJOR_MINOR: /* 12 bytes: 4 major, 4 minor, 4 inode
+ 		 * This format is never actually used but was
+ 		 * an historical accident
+ 		 */
+ 		if (fsidlen != 12)
+-			goto out;
+-		memcpy(&dev, fsid, 4); major = ntohl(dev);
+-		memcpy(&dev, fsid+4, 4); minor = ntohl(dev);
+-		memcpy(&inode, fsid+8, 4);
++			return -1;
++		memcpy(&dev, fsid, 4);
++		parsed->major = ntohl(dev);
++		memcpy(&dev, fsid+4, 4);
++		parsed->minor = ntohl(dev);
++		memcpy(&inode32, fsid+8, 4);
++		parsed->inode = inode32;
+ 		break;
+ 
+ 	case FSID_ENCODE_DEV: /* 8 bytes: 4 byte packed device number, 4 inode */
+@@ -457,41 +448,138 @@ static void nfsd_fh(FILE *f)
+ 		 * no-one outside this host has any business interpreting it
+ 		 */
+ 		if (fsidlen != 8)
+-			goto out;
++			return -1;
+ 		memcpy(&dev, fsid, 4);
+-		memcpy(&inode, fsid+4, 4);
+-		major = (dev & 0xfff00) >> 8;
+-		minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
++		memcpy(&inode32, fsid+4, 4);
++		parsed->inode = inode32;
++		parsed->major = (dev & 0xfff00) >> 8;
++		parsed->minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
+ 		break;
+ 
+ 	case FSID_UUID4_INUM: /* 4 byte inode number and 4 byte uuid */
+ 		if (fsidlen != 8)
+-			goto out;
+-		memcpy(&inode, fsid, 4);
+-		uuidlen = 4;
+-		fhuuid = fsid+4;
++			return -1;
++		memcpy(&inode32, fsid, 4);
++		parsed->inode = inode32;
++		parsed->uuidlen = 4;
++		parsed->fhuuid = fsid+4;
+ 		break;
+ 	case FSID_UUID8: /* 8 byte uuid */
+ 		if (fsidlen != 8)
+-			goto out;
+-		uuidlen = 8;
+-		fhuuid = fsid;
++			return -1;
++		parsed->uuidlen = 8;
++		parsed->fhuuid = fsid;
+ 		break;
+ 	case FSID_UUID16: /* 16 byte uuid */
+ 		if (fsidlen != 16)
+-			goto out;
+-		uuidlen = 16;
+-		fhuuid = fsid;
++			return -1;
++		parsed->uuidlen = 16;
++		parsed->fhuuid = fsid;
+ 		break;
+ 	case FSID_UUID16_INUM: /* 8 byte inode number and 16 byte uuid */
+ 		if (fsidlen != 24)
+-			goto out;
+-		memcpy(&inode64, fsid, 8);
+-		inode = inode64;
+-		uuidlen = 16;
+-		fhuuid = fsid+8;
++			return -1;
++		memcpy(&parsed->inode, fsid, 8);
++		parsed->uuidlen = 16;
++		parsed->fhuuid = fsid+8;
+ 		break;
+ 	}
++	return 0;
++}
++
++static bool match_fsid(struct parsed_fsid *parsed, nfs_export *exp, char *path)
++{
++	struct stat stb;
++	int type;
++	char u[16];
++
++	if (stat(path, &stb) != 0)
++		return false;
++	if (!S_ISDIR(stb.st_mode) && !S_ISREG(stb.st_mode))
++		return false;
++
++	switch (parsed->fsidtype) {
++	case FSID_DEV:
++	case FSID_MAJOR_MINOR:
++	case FSID_ENCODE_DEV:
++		if (stb.st_ino != parsed->inode)
++			return false;
++		if (parsed->major != major(stb.st_dev) ||
++		    parsed->minor != minor(stb.st_dev))
++			return false;
++		return true;
++	case FSID_NUM:
++		if (((exp->m_export.e_flags & NFSEXP_FSID) == 0 ||
++		     exp->m_export.e_fsid != parsed->fsidnum))
++			return false;
++		return true;
++	case FSID_UUID4_INUM:
++	case FSID_UUID16_INUM:
++		if (stb.st_ino != parsed->inode)
++			return false;
++		goto check_uuid;
++	case FSID_UUID8:
++	case FSID_UUID16:
++		if (!is_mountpoint(path))
++			return false;
++	check_uuid:
++		if (exp->m_export.e_uuid)
++			get_uuid(exp->m_export.e_uuid, parsed->uuidlen, u);
++		else
++			for (type = 0;
++			     uuid_by_path(path, type, parsed->uuidlen, u);
++			     type++)
++				if (memcmp(u, parsed->fhuuid, parsed->uuidlen) == 0)
++					return true;
++
++		if (memcmp(u, parsed->fhuuid, parsed->uuidlen) != 0)
++			return false;
++		return true;
++	}
++	/* Well, unreachable, actually: */
++	return false;
++}
++
++static void nfsd_fh(FILE *f)
++{
++	/* request are:
++	 *  domain fsidtype fsid
++	 * interpret fsid, find export point and options, and write:
++	 *  domain fsidtype fsid expiry path
++	 */
++	char *cp;
++	char *dom;
++	int fsidtype;
++	int fsidlen;
++	char fsid[32];
++	struct parsed_fsid parsed;
++	struct exportent *found = NULL;
++	struct addrinfo *ai = NULL;
++	char *found_path = NULL;
++	nfs_export *exp;
++	int i;
++	int dev_missing = 0;
++
++	if (readline(fileno(f), &lbuf, &lbuflen) != 1)
++		return;
++
++	xlog(D_CALL, "nfsd_fh: inbuf '%s'", lbuf);
++
++	cp = lbuf;
++
++	dom = malloc(strlen(cp));
++	if (dom == NULL)
++		return;
++	if (qword_get(&cp, dom, strlen(cp)) <= 0)
++		goto out;
++	if (qword_get_int(&cp, &fsidtype) != 0)
++		goto out;
++	if (fsidtype < 0 || fsidtype > 7)
++		goto out; /* unknown type */
++	if ((fsidlen = qword_get(&cp, fsid, 32)) <= 0)
++		goto out;
++	if (parse_fsid(fsidtype, fsidlen, fsid, &parsed))
++		goto out;
+ 
+ 	auth_reload();
+ 
+@@ -505,10 +593,7 @@ static void nfsd_fh(FILE *f)
+ 	for (i=0 ; i < MCL_MAXTYPES; i++) {
+ 		nfs_export *next_exp;
+ 		for (exp = exportlist[i].p_head; exp; exp = next_exp) {
+-			struct stat stb;
+-			char u[16];
+ 			char *path;
+-			int type;
+ 
+ 			if (exp->m_export.e_flags & NFSEXP_CROSSMOUNT) {
+ 				static nfs_export *prev = NULL;
+@@ -542,60 +627,20 @@ static void nfsd_fh(FILE *f)
+ 					   exp->m_export.e_mountpoint:
+ 					   exp->m_export.e_path))
+ 				dev_missing ++;
+-			if (stat(path, &stb) != 0)
+-				continue;
+-			if (!S_ISDIR(stb.st_mode) && !S_ISREG(stb.st_mode)) {
++
++			if (!match_fsid(&parsed, exp, path))
+ 				continue;
+-			}
+-			switch(fsidtype){
+-			case FSID_DEV:
+-			case FSID_MAJOR_MINOR:
+-			case FSID_ENCODE_DEV:
+-				if (stb.st_ino != inode)
+-					continue;
+-				if (major != major(stb.st_dev) ||
+-				    minor != minor(stb.st_dev))
+-					continue;
+-				break;
+-			case FSID_NUM:
+-				if (((exp->m_export.e_flags & NFSEXP_FSID) == 0 ||
+-				     exp->m_export.e_fsid != fsidnum))
+-					continue;
+-				break;
+-			case FSID_UUID4_INUM:
+-			case FSID_UUID16_INUM:
+-				if (stb.st_ino != inode)
+-					continue;
+-				goto check_uuid;
+-			case FSID_UUID8:
+-			case FSID_UUID16:
+-				if (!is_mountpoint(path))
+-					continue;
+-			check_uuid:
+-				if (exp->m_export.e_uuid)
+-					get_uuid(exp->m_export.e_uuid,
+-						 uuidlen, u);
+-				else
+-					for (type = 0;
+-					     uuid_by_path(path, type, uuidlen, u);
+-					     type++)
+-						if (memcmp(u, fhuuid, uuidlen) == 0)
+-							break;
+-
+-				if (memcmp(u, fhuuid, uuidlen) != 0)
+-					continue;
+-				break;
+-			}
+ 			if (is_ipaddr_client(dom)
+ 						&& !ipaddr_client_matches(exp, ai))
+ 					continue;
+-			/* It's a match !! */
+-			if (!found) {
++			if (!found || subexport(&exp->m_export, found)) {
+ 				found = &exp->m_export;
++				free(found_path);
+ 				found_path = strdup(path);
+ 				if (found_path == NULL)
+ 					goto out;
+-			} else if (strcmp(found->e_path, exp->m_export.e_path)!= 0)
++			} else if (strcmp(found->e_path, exp->m_export.e_path)
++				   && !subexport(found, &exp->m_export))
+ 			{
+ 				xlog(L_WARNING, "%s and %s have same filehandle for %s, using first",
+ 				     found_path, path, dom);

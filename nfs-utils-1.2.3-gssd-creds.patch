@@ -1,0 +1,17 @@
+diff -up nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig nfs-utils-1.2.3/utils/gssd/krb5_util.c
+--- nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig	2012-02-29 11:24:39.000000000 -0500
++++ nfs-utils-1.2.3/utils/gssd/krb5_util.c	2012-02-29 11:28:43.000000000 -0500
+@@ -231,6 +231,13 @@ gssd_find_existing_krb5_ccache(uid_t uid
+ 				free(namelist[i]);
+ 				continue;
+ 			}
++			if (uid == 0 && !root_uses_machine_creds && 
++				strstr(namelist[i]->d_name, "_machine_")) {
++				printerr(3, "CC file '%s' not available to root\n",
++					 statname);
++				free(namelist[i]);
++				continue;
++			}
+ 			if (!query_krb5_ccache(buf, &princname, &realm)) {
+ 				printerr(3, "CC file '%s' is expired or corrupt\n",
+ 					 statname);

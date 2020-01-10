@@ -1,0 +1,24 @@
+diff -up nfs-utils-1.2.3/utils/mountd/auth.c.orig nfs-utils-1.2.3/utils/mountd/auth.c
+--- nfs-utils-1.2.3/utils/mountd/auth.c.orig	2015-02-19 12:32:05.436572591 -0500
++++ nfs-utils-1.2.3/utils/mountd/auth.c	2015-02-19 12:32:36.101176713 -0500
+@@ -182,6 +182,9 @@ auth_authenticate_newcache(const struct 
+ 				continue;
+ 			if (!client_matches(exp, my_client.m_hostname, ai))
+ 				continue;
++			if (exp->m_export.e_flags & NFSEXP_V4ROOT)
++				/* not acceptable for v[23] export */
++				continue;
+ 			break;
+ 		}
+ 	*error = not_exported;
+@@ -210,10 +213,6 @@ auth_authenticate_internal(const struct 
+ 			return NULL;
+ 		}
+ 	}
+-	if (exp->m_export.e_flags & NFSEXP_V4ROOT) {
+-		*error = no_entry;
+-		return NULL;
+-	}
+ 	if (!(exp->m_export.e_flags & NFSEXP_INSECURE_PORT) &&
+ 		     nfs_get_port(caller) >= IPPORT_RESERVED) {
+ 		*error = illegal_port;

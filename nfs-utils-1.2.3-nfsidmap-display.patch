@@ -1,0 +1,165 @@
+commit 1662bf0107aa862d9b469526672c7ff00efb36fb
+Author: Steve Dickson <steved@redhat.com>
+Date:   Wed Nov 18 07:02:58 2015 -0500
+
+    nfsidmap: Display the effective NFSv4 domain name
+    
+    Sorry for the extensive man page changes. I added the description
+    for the new "-d" option, then realized there was no explanation
+    about what an "NFSv4 domain name" is.
+    
+    Signed-off-by: Chuck Lever <chuck.lever@oracle.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/nfsidmap/nfsidmap.c b/utils/nfsidmap/nfsidmap.c
+index d30ff13..2b45563 100644
+--- a/utils/nfsidmap/nfsidmap.c
++++ b/utils/nfsidmap/nfsidmap.c
+@@ -15,7 +15,7 @@
+ #include "conffile.h"
+ 
+ int verbose = 0;
+-char *usage="Usage: %s [-v] [-c || [-u|-g|-r key] || [-t timeout] key desc]";
++char *usage = "Usage: %s [-v] [-c || [-u|-g|-r key] || -d || [-t timeout] key desc]";
+ 
+ #define MAX_ID_LEN   11
+ #define IDMAP_NAMESZ 128
+@@ -40,6 +40,21 @@ static int keyring_clear(char *keyring);
+ #define UIDKEYS 0x1
+ #define GIDKEYS 0x2
+ 
++static int display_default_domain(void)
++{
++	char domain[NFS4_MAX_DOMAIN_LEN];
++	int rc;
++
++	rc = nfs4_get_default_domain(NULL, domain, NFS4_MAX_DOMAIN_LEN);
++	if (rc) {
++		xlog_errno(rc, "nfs4_get_default_domain failed: %m");
++		return EXIT_FAILURE;
++	}
++
++	printf("%s\n", domain);
++	return EXIT_SUCCESS;
++}
++
+ /*
+  * Find either a user or group id based on the name@domain string
+  */
+@@ -247,7 +262,7 @@ int main(int argc, char **argv)
+ 	key_serial_t key, parent_keyring, child_keyring;
+ 	char *progname, *keystr = NULL;
+ 	char child_name[BUFSIZ];
+-	int clearing = 0, keymask = 0, i;
++	int clearing = 0, keymask = 0, i, display = 0;
+ 	long child_size;
+ 
+ 	/* Set the basename */
+@@ -258,8 +273,11 @@ int main(int argc, char **argv)
+ 
+ 	xlog_open(progname);
+ 
+-	while ((opt = getopt(argc, argv, "u:g:r:ct:v")) != -1) {
++	while ((opt = getopt(argc, argv, "du:g:r:ct:v")) != -1) {
+ 		switch (opt) {
++		case 'd':
++			display++;
++			break;
+ 		case 'u':
+ 			keymask = UIDKEYS;
+ 			keystr = strdup(optarg);
+@@ -294,6 +312,8 @@ int main(int argc, char **argv)
+ 	if (!verbose)
+ 		verbose = conf_get_num("General", "Verbosity", 0);
+ 
++	if (display)
++		return display_default_domain();
+ 	if (keystr) {
+ 		rc = key_revoke(keystr, keymask);
+ 		return rc;		
+diff --git a/utils/nfsidmap/nfsidmap.man b/utils/nfsidmap/nfsidmap.man
+index 3a3a523..04ddff6 100644
+--- a/utils/nfsidmap/nfsidmap.man
++++ b/utils/nfsidmap/nfsidmap.man
+@@ -11,27 +11,54 @@ nfsidmap \- The NFS idmapper upcall program
+ .B "nfsidmap [-v] [-c]"
+ .br
+ .B "nfsidmap [-v] [-u|-g|-r user]"
++.br
++.B "nfsidmap -d"
+ .SH DESCRIPTION
+-The file
++The NFSv4 protocol represents the local system's UID and GID values
++on the wire as strings of the form
++.IR user@domain .
++The process of translating from UID to string and string to UID is
++referred to as "ID mapping."
++.PP
++The system derives the
++.I user
++part of the string by performing a password or group lookup.
++The lookup mechanism is configured in
++.IR /etc/idmapd.conf .
++.PP
++By default, the
++.I domain
++part of the string is the system's DNS domain name.
++It can also be specified in
++.I /etc/idmapd.conf
++if the system is multi-homed,
++or if the system's DNS domain name does
++not match the name of the system's Kerberos realm.
++.PP
++The
+ .I /usr/sbin/nfsidmap
+-is used by the NFS idmapper to translate user and group ids into names, and to
+-translate user and group names into ids. Idmapper uses request-key to perform
+-the upcall and cache the result.
++program performs translations on behalf of the kernel.
++The kernel uses the request-key mechanism to perform
++an upcall.
+ .I /usr/sbin/nfsidmap
+-is called by /sbin/request-key, and will perform the translation and
+-initialize a key with the resulting information.
++is invoked by /sbin/request-key, performs the translation,
++and initializes a key with the resulting information.
++The kernel then caches the translation results in the key.
+ .PP
+ .I nfsidmap
+-can also used to clear the keyring of all the keys or 
+-revoke one particular key.  
+-This is useful when the id mappings have failed to due 
+-to a lookup error resulting in all the cached uids/gids to be set 
+-to the user id nobody.
++can also clear cached ID map results in the kernel,
++or revoke one particular key.
++An incorrect cached key can result in file and directory ownership
++reverting to "nobody" on NFSv4 mount points.
+ .SH OPTIONS
+ .TP
+ .B -c 
+ Clear the keyring of all the keys.
+ .TP
++.B -d
++Display the system's effective NFSv4 domain name on
++.IR stdout .
++.TP
+ .B -g user
+ Revoke the gid key of the given user.
+ .TP
+@@ -89,5 +116,15 @@ Notice that the new line was added above the line for the generic program.
+ request-key will find the first matching line and run the corresponding program.
+ In this case, /some/other/program will handle all uid lookups, and
+ /usr/sbin/nfsidmap will handle gid, user, and group lookups.
++.SH FILES
++.TP
++.I /etc/idmapd.conf
++ID mapping configuration file
++.TP
++.I /etc/request-key.conf
++Request key configuration file
++.SH "SEE ALSO"
++.BR idmapd.conf (5),
++.BR request-key (8)
+ .SH AUTHOR
+ Bryan Schumaker, <bjschuma@netapp.com>

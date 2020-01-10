@@ -1,0 +1,52 @@
+diff -up nfs-utils-1.2.3/aclocal/librpcsecgss.m4.orig nfs-utils-1.2.3/aclocal/librpcsecgss.m4
+--- nfs-utils-1.2.3/aclocal/librpcsecgss.m4.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/aclocal/librpcsecgss.m4	2014-03-31 14:38:17.000000000 -0400
+@@ -14,6 +14,8 @@ AC_DEFUN([AC_LIBRPCSECGSS], [
+                  [AC_DEFINE([HAVE_AUTHGSS_SET_DEBUG_LEVEL], 1,
+                  [Define to 1 if you have the `authgss_set_debug_level' function.])])
+ 
++    AC_DEFINE([HAVE_AUTHGSS_FREE_PRIVATE_DATA], 1,
++	      [Define to 1 if your rpcsec library provides authgss_free_private_data,])
+   fi
+ 
+ ])dnl
+diff -up nfs-utils-1.2.3/aclocal/libtirpc.m4.orig nfs-utils-1.2.3/aclocal/libtirpc.m4
+--- nfs-utils-1.2.3/aclocal/libtirpc.m4.orig	2014-03-31 14:37:20.000000000 -0400
++++ nfs-utils-1.2.3/aclocal/libtirpc.m4	2014-03-31 14:38:17.000000000 -0400
+@@ -24,6 +24,13 @@ AC_DEFUN([AC_LIBTIRPC], [
+   fi
+ 
+   if test "$enable_tirpc" != "no"; then
++
++    dnl Check if library contains authgss_free_private_data
++    AC_CHECK_LIB([tirpc], [authgss_free_private_data], [have_free_private_data=yes],
++			[have_free_private_data=no])
++  fi
++
++  if test "$enable_tirpc" != "no"; then
+     dnl also must have the headers installed where we expect
+     dnl look for headers; add -I compiler option if found
+     AC_CHECK_HEADERS([${tirpc_header_dir}/netconfig.h],
+@@ -42,6 +49,10 @@ AC_DEFUN([AC_LIBTIRPC], [
+     AC_DEFINE([HAVE_LIBTIRPC], 1,
+               [Define to 1 if you have and wish to use libtirpc.])
+     LIBTIRPC="-ltirpc"
++    if test "$have_free_private_data" = "yes"; then
++      AC_DEFINE([HAVE_AUTHGSS_FREE_PRIVATE_DATA], 1,
++	      [Define to 1 if your rpcsec library provides authgss_free_private_data,])
++    fi
+   else
+     LIBTIRPC=""
+   fi
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig nfs-utils-1.2.3/utils/gssd/gssd_proc.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/gssd_proc.c	2014-03-31 14:38:17.000000000 -0400
+@@ -1088,7 +1088,7 @@ process_krb5_upcall(struct clnt_info *cl
+ out:
+ 	if (token.value)
+ 		free(token.value);
+-#ifndef HAVE_LIBTIRPC
++#ifdef HAVE_AUTHGSS_FREE_PRIVATE_DATA
+ 	if (pd.pd_ctx_hndl.length != 0)
+ 		authgss_free_private_data(&pd);
+ #endif

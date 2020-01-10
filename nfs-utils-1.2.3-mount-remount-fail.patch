@@ -1,0 +1,11 @@
+diff -up nfs-utils-1.2.3/utils/mount/stropts.c.orig nfs-utils-1.2.3/utils/mount/stropts.c
+--- nfs-utils-1.2.3/utils/mount/stropts.c.orig	2015-02-19 13:30:21.892167091 -0500
++++ nfs-utils-1.2.3/utils/mount/stropts.c	2015-02-19 13:35:41.512433712 -0500
+@@ -995,6 +995,7 @@ static int nfs_remount(struct nfsmount_i
+ {
+ 	if (nfs_sys_mount(mi, mi->options))
+ 		return EX_SUCCESS;
++	mount_error(mi->spec, mi->node, errno);
+ 	return EX_FAIL;
+ }
+ 

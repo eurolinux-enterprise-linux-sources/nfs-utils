@@ -1,0 +1,105 @@
+diff -up nfs-utils-1.2.3/support/nfs/svc_create.c.orig nfs-utils-1.2.3/support/nfs/svc_create.c
+--- nfs-utils-1.2.3/support/nfs/svc_create.c.orig	2015-12-02 08:41:16.190601732 -0500
++++ nfs-utils-1.2.3/support/nfs/svc_create.c	2015-12-02 08:50:56.243236616 -0500
+@@ -130,7 +130,7 @@ svc_create_bindaddr(struct netconfig *nc
+ 		hint.ai_family = AF_INET6;
+ #endif	/* IPV6_SUPPORTED */
+ 	else {
+-		xlog(D_GENERAL, "Unrecognized bind address family: %s",
++		xlog(L_ERROR, "Unrecognized bind address family: %s",
+ 			nconf->nc_protofmly);
+ 		return NULL;
+ 	}
+@@ -140,7 +140,7 @@ svc_create_bindaddr(struct netconfig *nc
+ 	else if (strcmp(nconf->nc_proto, NC_TCP) == 0)
+ 		hint.ai_protocol = (int)IPPROTO_TCP;
+ 	else {
+-		xlog(D_GENERAL, "Unrecognized bind address protocol: %s",
++		xlog(L_ERROR, "Unrecognized bind address protocol: %s",
+ 			nconf->nc_proto);
+ 		return NULL;
+ 	}
+@@ -272,15 +272,17 @@ svc_create_nconf_rand_port(const char *n
+ 	xprt = svc_tli_create(RPC_ANYFD, nconf, &bindaddr, 0, 0);
+ 	freeaddrinfo(ai);
+ 	if (xprt == NULL) {
+-		xlog(D_GENERAL, "Failed to create listener xprt "
++		xlog(L_ERROR, "Failed to create listener xprt "
+ 			"(%s, %u, %s)", name, version, nconf->nc_netid);
+ 		return 0;
+ 	}
+ 
++	rpc_createerr.cf_stat = rpc_createerr.cf_error.re_errno = 0;
+ 	if (!svc_reg(xprt, program, version, dispatch, nconf)) {
+ 		/* svc_reg(3) destroys @xprt in this case */
+-		xlog(D_GENERAL, "Failed to register (%s, %u, %s)",
+-				name, version, nconf->nc_netid);
++		xlog(L_ERROR, "Failed to register (%s, %u, %s): %s",
++				name, version, nconf->nc_netid,
++				clnt_spcreateerror("svc_reg() err"));
+ 		return 0;
+ 	}
+ 
+diff -up nfs-utils-1.2.3/support/nfs/svc_socket.c.orig nfs-utils-1.2.3/support/nfs/svc_socket.c
+--- nfs-utils-1.2.3/support/nfs/svc_socket.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/support/nfs/svc_socket.c	2015-12-02 08:55:10.231331519 -0500
+@@ -24,6 +24,7 @@
+ #include <sys/socket.h>
+ #include <sys/fcntl.h>
+ #include <errno.h>
++#include "xlog.h"
+ 
+ #ifdef _LIBC
+ # include <libintl.h>
+@@ -48,7 +49,7 @@ svc_socket (u_long number, int type, int
+ 
+   if ((sock = __socket (AF_INET, type, protocol)) < 0)
+     {
+-      perror (_("svc_socket: socket creation problem"));
++	  xlog(L_ERROR, "svc_socket: socket creation problem: %m");
+       return sock;
+     }
+ 
+@@ -59,7 +60,7 @@ svc_socket (u_long number, int type, int
+ 			sizeof (ret));
+       if (ret < 0)
+ 	{
+-	  perror (_("svc_socket: socket reuse problem"));
++	  xlog(L_ERROR, "svc_socket: socket reuse problem: %m");
+ 	  return ret;
+ 	}
+     }
+@@ -94,7 +95,7 @@ svc_socket (u_long number, int type, int
+       addr.sin_port = servp->s_port;
+       if (bind (sock, (struct sockaddr *) &addr, len) < 0)
+ 	{
+-	  perror (_("svc_socket: bind problem"));
++	  xlog(L_ERROR, "svc_socket: bind problem: %m");
+ 	  (void) __close (sock);
+ 	  sock = -1;
+ 	}
+@@ -104,7 +105,7 @@ svc_socket (u_long number, int type, int
+ 	  addr.sin_port = 0;
+ 	  if (bind (sock, (struct sockaddr *) &addr, len) < 0)
+ 	    {
+-	      perror (_("svc_socket: bind problem"));
++	  	  xlog(L_ERROR, "svc_socket: bind problem: %m");
+ 	      (void) __close (sock);
+ 	      sock = -1;
+ 	    }
+@@ -129,13 +130,13 @@ svc_socket (u_long number, int type, int
+ 	int flags;
+ 	if ((flags = fcntl(sock, F_GETFL)) < 0)
+ 	  {
+-	      perror (_("svc_socket: can't get socket flags"));
++		  xlog(L_ERROR, "svc_socket: can't get socket flags: %m");
+ 	      (void) __close (sock);
+ 	      sock = -1;
+ 	  }
+ 	else if (fcntl(sock, F_SETFL, flags|O_NONBLOCK) < 0)
+ 	  {
+-	      perror (_("svc_socket: can't set socket flags"));
++		  xlog(L_ERROR, "svc_socket: can't get socket flags: %m");
+ 	      (void) __close (sock);
+ 	      sock = -1;
+ 	  }

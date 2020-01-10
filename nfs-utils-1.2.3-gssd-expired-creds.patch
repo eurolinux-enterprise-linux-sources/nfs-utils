@@ -1,0 +1,15 @@
+diff -up nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig nfs-utils-1.2.3/utils/gssd/krb5_util.c
+--- nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig	2015-05-16 11:07:12.764000002 -0400
++++ nfs-utils-1.2.3/utils/gssd/krb5_util.c	2015-05-16 11:09:26.970989349 -0400
+@@ -344,6 +344,11 @@ gssd_get_single_krb5_cred(krb5_context c
+ 
+ 	memset(&my_creds, 0, sizeof(my_creds));
+ 
++	/*
++	 * Workaround for clock skew among NFS server, NFS client and KDC
++	 * 300 because clock skew must be within 300sec for kerberos
++	 */
++	now += 300;
+ 	if (ple->ccname && ple->endtime > now && !nocache) {
+ 		printerr(2, "INFO: Credentials in CC '%s' are good until %d\n",
+ 			 ple->ccname, ple->endtime);

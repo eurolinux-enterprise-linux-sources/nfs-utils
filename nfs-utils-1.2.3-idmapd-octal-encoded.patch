@@ -1,0 +1,15 @@
+diff -up nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig nfs-utils-1.2.3/utils/idmapd/idmapd.c
+--- nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig	2012-03-07 15:27:25.920650000 -0500
++++ nfs-utils-1.2.3/utils/idmapd/idmapd.c	2012-03-08 10:19:56.168699000 -0500
+@@ -922,9 +922,9 @@ getfield(char **bpp, char *fld, size_t f
+ 		if (*bp == '\\') {
+ 			if ((n = sscanf(bp, "\\%03o", &val)) != 1)
+ 				return (-1);
+-			if (val > (char)-1)
++			if (val > UCHAR_MAX)
+ 				return (-1);
+-			*fld++ = (char)val;
++			*fld++ = val;
+ 			bp += 4;
+ 		} else {
+ 			*fld++ = *bp;

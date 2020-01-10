@@ -1,0 +1,26 @@
+commit 6fbbb73f08a8f685a323b2d5221f3e8b87ebba68
+Author: Steve Dickson <steved@redhat.com>
+Date:   Mon Dec 5 09:48:46 2011 -0500
+
+    mount.nfs: Background mounts failing on time out errors.
+    
+    Mounting with the "-o v3,bg,proto=udp" options will
+    fail, instead of retrying, when the server is down.
+    The reason being nfs_rewrite_pmap_mount_options()
+    does not interrupt RPC timeouts correctly.
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/stropts.c b/utils/mount/stropts.c
+index 4032bf3..d52e21a 100644
+--- a/utils/mount/stropts.c
++++ b/utils/mount/stropts.c
+@@ -540,6 +540,8 @@ nfs_rewrite_pmap_mount_options(struct mount_options *options)
+ 			errno = EOPNOTSUPP;
+ 		else if (rpc_createerr.cf_stat == RPC_AUTHERROR)
+ 			errno = EACCES;
++		else if (rpc_createerr.cf_stat == RPC_TIMEDOUT)
++			errno = ETIMEDOUT;
+ 		else if (rpc_createerr.cf_error.re_errno != 0)
+ 			errno = rpc_createerr.cf_error.re_errno;
+ 		return 0;

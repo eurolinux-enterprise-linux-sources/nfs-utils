@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.2.3/utils/exportfs/exports.man.orig nfs-utils-1.2.3/utils/exportfs/exports.man
+--- nfs-utils-1.2.3/utils/exportfs/exports.man.orig	2015-02-19 12:22:47.453516970 -0500
++++ nfs-utils-1.2.3/utils/exportfs/exports.man	2015-02-19 12:23:11.579997426 -0500
+@@ -57,7 +57,7 @@ Only the host part of each
+ netgroup members is consider in checking for membership.  Empty host
+ parts or those containing a single dash (\-) are ignored.
+ .IP "wildcards
+-+Machine names may contain the wildcard characters \fI*\fR and \fI?\fR, or may contain character class lists within [square brackets].
++Machine names may contain the wildcard characters \fI*\fR and \fI?\fR, or may contain character class lists within [square brackets].
+ This can be used to make the \fIexports\fR file more compact; for instance,
+ \fI*.cs.foo.edu\fR matches all hosts in the domain
+ \fIcs.foo.edu\fR.  As these characters also match the dots in a domain

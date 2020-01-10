@@ -1,0 +1,239 @@
+diff -up nfs-utils-1.2.3/utils/mountd/auth.c.orig nfs-utils-1.2.3/utils/mountd/auth.c
+--- nfs-utils-1.2.3/utils/mountd/auth.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/mountd/auth.c	2012-09-11 14:49:58.318311000 -0400
+@@ -112,15 +112,23 @@ auth_reload()
+ 	return counter;
+ }
+ 
++static char *get_client_ipaddr_name(const struct sockaddr *caller)
++{
++	char buf[INET6_ADDRSTRLEN + 1];
++
++	buf[0] = '$';
++	host_ntop(caller, buf + 1, sizeof(buf) - 1);
++	return strdup(buf);
++}
++
+ static char *
+ get_client_hostname(const struct sockaddr *caller, struct addrinfo *ai,
+ 		enum auth_error *error)
+ {
+-	char buf[INET6_ADDRSTRLEN];
+ 	char *n;
+ 
+ 	if (use_ipaddr)
+-		return strdup(host_ntop(caller, buf, sizeof(buf)));
++		return get_client_ipaddr_name(caller);
+ 	n = client_compose(ai);
+ 	*error = unknown_host;
+ 	if (!n)
+@@ -131,6 +139,23 @@ get_client_hostname(const struct sockadd
+ 	return strdup("DEFAULT");
+ }
+ 
++bool ipaddr_client_matches(nfs_export *exp, struct addrinfo *ai)
++{
++	return client_check(exp->m_client, ai);
++}
++
++bool namelist_client_matches(nfs_export *exp, char *dom)
++{
++	return client_member(dom, exp->m_client->m_hostname);
++}
++
++bool client_matches(nfs_export *exp, char *dom, struct addrinfo *ai)
++{
++	if (is_ipaddr_client(dom))
++		return ipaddr_client_matches(exp, ai);
++	return namelist_client_matches(exp, dom);
++}
++
+ /* return static nfs_export with details filled in */
+ static nfs_export *
+ auth_authenticate_newcache(const struct sockaddr *caller,
+@@ -155,9 +180,7 @@ auth_authenticate_newcache(const struct 
+ 		for (exp = exportlist[i].p_head; exp; exp = exp->m_next) {
+ 			if (strcmp(path, exp->m_export.e_path))
+ 				continue;
+-			if (!use_ipaddr && !client_member(my_client.m_hostname, exp->m_client->m_hostname))
+-				continue;
+-			if (use_ipaddr && !client_check(exp->m_client, ai))
++			if (!client_matches(exp, my_client.m_hostname, ai))
+ 				continue;
+ 			break;
+ 		}
+diff -up nfs-utils-1.2.3/utils/mountd/cache.c.orig nfs-utils-1.2.3/utils/mountd/cache.c
+--- nfs-utils-1.2.3/utils/mountd/cache.c.orig	2012-09-11 14:43:32.562895000 -0400
++++ nfs-utils-1.2.3/utils/mountd/cache.c	2012-09-11 14:55:59.174992000 -0400
+@@ -83,7 +83,6 @@ static void auth_unix_ip(FILE *f)
+ 	char ipaddr[INET6_ADDRSTRLEN];
+ 	char *client = NULL;
+ 	struct addrinfo *tmp = NULL;
+-	struct addrinfo *ai = NULL;
+ 	if (readline(fileno(f), &lbuf, &lbuflen) != 1)
+ 		return;
+ 
+@@ -106,12 +105,16 @@ static void auth_unix_ip(FILE *f)
+ 
+ 	/* addr is a valid, interesting address, find the domain name... */
+ 	if (!use_ipaddr) {
++		struct addrinfo *ai = NULL;
++
+ 		ai = client_resolve(tmp->ai_addr);
++		if (ai == NULL)
++			goto out;
+ 		client = client_compose(ai);
+ 		freeaddrinfo(ai);
++		if (!client)
++			goto out;
+ 	}
+-	freeaddrinfo(tmp);
+-
+ 	qword_print(f, "nfsd");
+ 	qword_print(f, ipaddr);
+ 	qword_printint(f, time(0)+30*60);
+@@ -123,6 +126,9 @@ static void auth_unix_ip(FILE *f)
+ 	xlog(D_CALL, "auth_unix_ip: client %p '%s'", client, client?client: "DEFAULT");
+ 
+ 	free(client);
++out:
++	freeaddrinfo(tmp);
++
+ }
+ 
+ static void auth_unix_gid(FILE *f)
+@@ -328,6 +334,21 @@ static char *next_mnt(void **v, char *p)
+ 	return me->mnt_dir;
+ }
+ 
++struct addrinfo *lookup_client_addr(char *dom)
++{
++	struct addrinfo *ret;
++	struct addrinfo *tmp;
++
++	dom++; /* skip initial "$" */
++
++	tmp = host_pton(dom);
++	if (tmp == NULL)
++		return NULL;
++	ret = client_resolve(tmp->ai_addr);
++	freeaddrinfo(tmp);
++	return ret;
++}
++
+ static void nfsd_fh(FILE *f)
+ {
+ 	/* request are:
+@@ -441,6 +462,12 @@ static void nfsd_fh(FILE *f)
+ 
+ 	auth_reload();
+ 
++	if (is_ipaddr_client(dom)) {
++		ai = lookup_client_addr(dom);
++		if (!ai)
++			goto out;
++	}
++
+ 	/* Now determine export point for this fsid/domain */
+ 	for (i=0 ; i < MCL_MAXTYPES; i++) {
+ 		nfs_export *next_exp;
+@@ -474,7 +501,8 @@ static void nfsd_fh(FILE *f)
+ 				next_exp = exp->m_next;
+ 			}
+ 
+-			if (!use_ipaddr && !client_member(dom, exp->m_client->m_hostname))
++			if (!is_ipaddr_client(dom)
++					&& !namelist_client_matches(exp, dom))
+ 				continue;
+ 			if (exp->m_export.e_mountpoint &&
+ 			    !is_mountpoint(exp->m_export.e_mountpoint[0]?
+@@ -525,18 +553,9 @@ static void nfsd_fh(FILE *f)
+ 					continue;
+ 				break;
+ 			}
+-			if (use_ipaddr) {
+-				if (ai == NULL) {
+-					struct addrinfo *tmp;
+-					tmp = host_pton(dom);
+-					if (tmp == NULL)
+-						goto out;
+-					ai = client_resolve(tmp->ai_addr);
+-					freeaddrinfo(tmp);
+-				}
+-				if (!client_check(exp->m_client, ai))
++			if (is_ipaddr_client(dom)
++						&& !ipaddr_client_matches(exp, ai))
+ 					continue;
+-			}
+ 			/* It's a match !! */
+ 			if (!found) {
+ 				found = &exp->m_export;
+@@ -687,14 +706,6 @@ static int path_matches(nfs_export *exp,
+ }
+ 
+ static int
+-client_matches(nfs_export *exp, char *dom, struct addrinfo *ai)
+-{
+-	if (use_ipaddr)
+-		return client_check(exp->m_client, ai);
+-	return client_member(dom, exp->m_client->m_hostname);
+-}
+-
+-static int
+ export_matches(nfs_export *exp, char *dom, char *path, struct addrinfo *ai)
+ {
+ 	return path_matches(exp, path) && client_matches(exp, dom, ai);
+@@ -779,17 +790,11 @@ static void nfsd_export(FILE *f)
+ 
+ 	auth_reload();
+ 
+-	if (use_ipaddr) {
+-		struct addrinfo *tmp;
+-		tmp = host_pton(dom);
+-		if (tmp == NULL)
+-			goto out;
+-		ai = client_resolve(tmp->ai_addr);
+-		freeaddrinfo(tmp);
++	if (is_ipaddr_client(dom)) {
++		ai = lookup_client_addr(dom);
+ 		if (!ai)
+ 			goto out;
+ 	}
+-
+ 	found = lookup_export(dom, path, ai);
+ 
+ 	if (found) {
+@@ -816,11 +821,11 @@ struct {
+ 	FILE *f;
+ 	char vbuf[RPC_CHAN_BUF_SIZE];
+ } cachelist[] = {
+-	{ "auth.unix.ip", auth_unix_ip, NULL},
+-	{ "auth.unix.gid", auth_unix_gid, NULL},
+-	{ "nfsd.export", nfsd_export, NULL},
+-	{ "nfsd.fh", nfsd_fh, NULL},
+-	{ NULL, NULL, NULL }
++	{ "auth.unix.ip", auth_unix_ip, NULL, ""},
++	{ "auth.unix.gid", auth_unix_gid, NULL, ""},
++	{ "nfsd.export", nfsd_export, NULL, ""},
++	{ "nfsd.fh", nfsd_fh, NULL, ""},
++	{ NULL, NULL, NULL, ""}
+ };
+ 
+ extern int manage_gids;
+diff -up nfs-utils-1.2.3/utils/mountd/mountd.h.orig nfs-utils-1.2.3/utils/mountd/mountd.h
+--- nfs-utils-1.2.3/utils/mountd/mountd.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/mountd/mountd.h	2012-09-11 14:49:58.342313000 -0400
+@@ -56,4 +56,13 @@ struct nfs_fh_len *
+ 		cache_get_filehandle(nfs_export *exp, int len, char *p);
+ int		cache_export(nfs_export *exp, char *path);
+ 
++bool ipaddr_client_matches(nfs_export *exp, struct addrinfo *ai);
++bool namelist_client_matches(nfs_export *exp, char *dom);
++bool client_matches(nfs_export *exp, char *dom, struct addrinfo *ai);
++
++static inline bool is_ipaddr_client(char *dom)
++{
++	return dom[0] == '$';
++}
++
+ #endif /* MOUNTD_H */

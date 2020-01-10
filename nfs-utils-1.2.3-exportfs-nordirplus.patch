@@ -1,0 +1,61 @@
+diff -up nfs-utils-1.2.3/support/include/nfs/export.h.orig nfs-utils-1.2.3/support/include/nfs/export.h
+--- nfs-utils-1.2.3/support/include/nfs/export.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/support/include/nfs/export.h	2014-08-24 15:45:49.000000000 -0400
+@@ -17,7 +17,8 @@
+ #define NFSEXP_ALLSQUASH	0x0008
+ #define NFSEXP_ASYNC		0x0010
+ #define NFSEXP_GATHERED_WRITES	0x0020
+-/* 40, 80, 100 unused */
++#define NFSEXP_NOREADDIRPLUS	0x0040
++/* 80, 100 unused */
+ #define NFSEXP_NOHIDE		0x0200
+ #define NFSEXP_NOSUBTREECHECK	0x0400
+ #define NFSEXP_NOAUTHNLM	0x0800
+diff -up nfs-utils-1.2.3/support/nfs/exports.c.orig nfs-utils-1.2.3/support/nfs/exports.c
+--- nfs-utils-1.2.3/support/nfs/exports.c.orig	2014-08-24 15:44:49.000000000 -0400
++++ nfs-utils-1.2.3/support/nfs/exports.c	2014-08-24 15:45:49.000000000 -0400
+@@ -256,6 +256,8 @@ putexportent(struct exportent *ep)
+ 		"in" : "");
+ 	fprintf(fp, "%sacl,", (ep->e_flags & NFSEXP_NOACL)?
+ 		"no_" : "");
++	if (ep->e_flags & NFSEXP_NOREADDIRPLUS)
++		fprintf(fp, "nordirplus,");
+ 	if (ep->e_flags & NFSEXP_FSID) {
+ 		fprintf(fp, "fsid=%d,", ep->e_fsid);
+ 	}
+@@ -522,6 +524,8 @@ parseopts(char *cp, struct exportent *ep
+ 			clearflags(NFSEXP_ASYNC, active, ep);
+ 		else if (!strcmp(opt, "async"))
+ 			setflags(NFSEXP_ASYNC, active, ep);
++		else if (!strcmp(opt, "nordirplus"))
++			setflags(NFSEXP_NOREADDIRPLUS, active, ep);
+ 		else if (!strcmp(opt, "nohide"))
+ 			setflags(NFSEXP_NOHIDE, active, ep);
+ 		else if (!strcmp(opt, "hide"))
+diff -up nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig nfs-utils-1.2.3/utils/exportfs/exportfs.c
+--- nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig	2014-08-24 15:44:49.000000000 -0400
++++ nfs-utils-1.2.3/utils/exportfs/exportfs.c	2014-08-24 15:46:10.000000000 -0400
+@@ -666,6 +666,8 @@ dump(int verbose)
+ 				c = dumpopt(c, "no_subtree_check");
+ 			if (ep->e_flags & NFSEXP_NOAUTHNLM)
+ 				c = dumpopt(c, "insecure_locks");
++			if (ep->e_flags & NFSEXP_NOREADDIRPLUS)
++				c = dumpopt(c, "nordirplus");
+ 			if (ep->e_flags & NFSEXP_NOACL)
+ 				c = dumpopt(c, "no_acl");
+ 			if (ep->e_flags & NFSEXP_FSID)
+diff -up nfs-utils-1.2.3/utils/exportfs/exports.man.orig nfs-utils-1.2.3/utils/exportfs/exports.man
+--- nfs-utils-1.2.3/utils/exportfs/exports.man.orig	2014-08-24 15:44:48.000000000 -0400
++++ nfs-utils-1.2.3/utils/exportfs/exports.man	2014-08-24 15:45:49.000000000 -0400
+@@ -350,6 +350,11 @@ supported so the same configuration can 
+ kernels alike.
+ 
+ .TP
++.IR nordirplus
++This option will disable READDIRPLUS request handling.  When set,
++READDIRPLUS requests from NFS clients return NFS3ERR_NOTSUPP, and
++clients fall back on READDIR.  This option affects only NFSv3 clients.
++.TP
+ .IR refer= path@host[+host][:path@host[+host]]
+ A client referencing the export point will be directed to choose from
+ the given list an alternative location for the filesystem.

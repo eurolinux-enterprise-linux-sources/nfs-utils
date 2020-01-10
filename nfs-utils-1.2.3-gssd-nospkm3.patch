@@ -1,0 +1,449 @@
+diff -up nfs-utils-1.2.3/configure.ac.orig nfs-utils-1.2.3/configure.ac
+--- nfs-utils-1.2.3/configure.ac.orig	2015-04-01 08:30:59.514174735 -0400
++++ nfs-utils-1.2.3/configure.ac	2015-04-01 08:31:32.842748667 -0400
+@@ -303,9 +303,6 @@ if test "$enable_gss" = yes; then
+   dnl 'gss' also depends on nfsidmap.h - at least for svcgssd_proc.c
+   AC_LIBNFSIDMAP
+ 
+-  AC_CHECK_HEADERS([spkm3.h], ,
+-                   [AC_MSG_WARN([Could not locate SPKM3 header; will not have SPKM3 support])])
+-
+   dnl Check for Kerberos V5
+   AC_KERBEROS_V5
+ 
+diff -up nfs-utils-1.2.3/README.orig nfs-utils-1.2.3/README
+--- nfs-utils-1.2.3/README.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/README	2015-04-01 08:31:32.842748667 -0400
+@@ -80,7 +80,7 @@ scripts can be written to work correctly
+        and starting the nfsd server is not important.
+        idmapd is only needed for NFSv4 support.
+        svcgssd is only needed if exportfs NFS filesystem with crypto-
+-       security (Kerberos or SPKM3).
++       security (Kerberos).
+ 
+    C/ exportfs -av ; rpc.mountd
+        It is important that exportfs be run before mountd so that
+@@ -130,7 +130,7 @@ scripts can be written to work correctly
+    B/ gssd ; idmapd
+       idmapd should be started before mounting any NFSv4 filesystems.
+       gssd should be started before mounting any NFS filesystems
+-      securely (with Kerberos of SPKM3).
++      securely (with Kerberos).
+ 
+    C/ statd should be run before any NFSv2 or NFSv3 filesystem is
+       mounted with remote locking (i.e. without -o nolock).
+diff -up nfs-utils-1.2.3/support/include/pseudoflavors.h.orig nfs-utils-1.2.3/support/include/pseudoflavors.h
+--- nfs-utils-1.2.3/support/include/pseudoflavors.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/support/include/pseudoflavors.h	2015-04-01 08:31:32.844748701 -0400
+@@ -4,9 +4,6 @@
+ #define RPC_AUTH_GSS_LKEY       390006
+ #define RPC_AUTH_GSS_LKEYI      390007
+ #define RPC_AUTH_GSS_LKEYP      390008
+-#define RPC_AUTH_GSS_SPKM       390009
+-#define RPC_AUTH_GSS_SPKMI      390010
+-#define RPC_AUTH_GSS_SPKMP      390011
+ 
+ struct flav_info {
+ 	char    *flavour;
+diff -up nfs-utils-1.2.3/support/nfs/exports.c.orig nfs-utils-1.2.3/support/nfs/exports.c
+--- nfs-utils-1.2.3/support/nfs/exports.c.orig	2015-04-01 08:30:59.519174820 -0400
++++ nfs-utils-1.2.3/support/nfs/exports.c	2015-04-01 08:31:32.844748701 -0400
+@@ -39,12 +39,6 @@ struct flav_info flav_map[] = {
+ 	{ "krb5",	RPC_AUTH_GSS_KRB5	},
+ 	{ "krb5i",	RPC_AUTH_GSS_KRB5I	},
+ 	{ "krb5p",	RPC_AUTH_GSS_KRB5P	},
+-	{ "lipkey",	RPC_AUTH_GSS_LKEY	},
+-	{ "lipkey-i",	RPC_AUTH_GSS_LKEYI	},
+-	{ "lipkey-p",	RPC_AUTH_GSS_LKEYP	},
+-	{ "spkm3",	RPC_AUTH_GSS_SPKM	},
+-	{ "spkm3i",	RPC_AUTH_GSS_SPKMI	},
+-	{ "spkm3p",	RPC_AUTH_GSS_SPKMP	},
+ 	{ "unix",	AUTH_UNIX		},
+ 	{ "sys",	AUTH_SYS		},
+ 	{ "null",	AUTH_NULL		},
+diff -up nfs-utils-1.2.3/utils/gssd/context.c.orig nfs-utils-1.2.3/utils/gssd/context.c
+--- nfs-utils-1.2.3/utils/gssd/context.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/context.c	2015-04-01 08:31:32.845748718 -0400
+@@ -51,10 +51,6 @@ serialize_context_for_kernel(gss_ctx_id_
+ {
+ 	if (g_OID_equal(&krb5oid, mech))
+ 		return serialize_krb5_ctx(ctx, buf, endtime);
+-#ifdef HAVE_SPKM3_H
+-	else if (g_OID_equal(&spkm3oid, mech))
+-		return serialize_spkm3_ctx(ctx, buf, endtime);
+-#endif
+ 	else {
+ 		printerr(0, "ERROR: attempting to serialize context with "
+ 				"unknown/unsupported mechanism oid\n");
+diff -up nfs-utils-1.2.3/utils/gssd/context.h.orig nfs-utils-1.2.3/utils/gssd/context.h
+--- nfs-utils-1.2.3/utils/gssd/context.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/context.h	2015-04-01 08:31:32.845748718 -0400
+@@ -43,8 +43,6 @@
+ 
+ int serialize_context_for_kernel(gss_ctx_id_t ctx, gss_buffer_desc *buf,
+ 				 gss_OID mech, int32_t *endtime);
+-int serialize_spkm3_ctx(gss_ctx_id_t ctx, gss_buffer_desc *buf,
+-			int32_t *endtime);
+ int serialize_krb5_ctx(gss_ctx_id_t ctx, gss_buffer_desc *buf,
+ 		       int32_t *endtime);
+ 
+diff -up nfs-utils-1.2.3/utils/gssd/context_spkm3.c.orig nfs-utils-1.2.3/utils/gssd/context_spkm3.c
+diff -up nfs-utils-1.2.3/utils/gssd/gssd.h.orig nfs-utils-1.2.3/utils/gssd/gssd.h
+--- nfs-utils-1.2.3/utils/gssd/gssd.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/gssd.h	2015-04-01 08:31:32.846748735 -0400
+@@ -55,7 +55,7 @@
+ /*
+  * The gss mechanisms that we can handle
+  */
+-enum {AUTHTYPE_KRB5, AUTHTYPE_SPKM3, AUTHTYPE_LIPKEY};
++enum {AUTHTYPE_KRB5, AUTHTYPE_LIPKEY};
+ 
+ 
+ 
+@@ -80,8 +80,6 @@ struct clnt_info {
+ 	char			*protocol;
+ 	int			krb5_fd;
+ 	int			krb5_poll_index;
+-	int			spkm3_fd;
+-	int			spkm3_poll_index;
+ 	int                     gssd_fd;
+ 	int                     gssd_poll_index;
+ 	struct sockaddr_storage addr;
+@@ -98,7 +96,6 @@ struct topdirs_info {
+ void init_client_list(void);
+ int update_client_list(void);
+ void handle_krb5_upcall(struct clnt_info *clp);
+-void handle_spkm3_upcall(struct clnt_info *clp);
+ void handle_gssd_upcall(struct clnt_info *clp);
+ void gssd_run(void);
+ 
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c.orig nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c.orig	2015-04-01 08:30:59.452173666 -0400
++++ nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c	2015-04-01 08:31:32.846748735 -0400
+@@ -98,17 +98,6 @@ scan_poll_results(int ret)
+ 			if (!ret)
+ 				break;
+ 		}
+-		i = clp->spkm3_poll_index;
+-		if (i >= 0 && pollarray[i].revents) {
+-			if (pollarray[i].revents & POLLHUP)
+-				dir_changed = 1;
+-			if (pollarray[i].revents & POLLIN)
+-				handle_spkm3_upcall(clp);
+-			pollarray[clp->spkm3_poll_index].revents = 0;
+-			ret--;
+-			if (!ret)
+-				break;
+-		}
+ 	}
+ };
+ 
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig nfs-utils-1.2.3/utils/gssd/gssd_proc.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_proc.c.orig	2015-04-01 08:30:59.422173150 -0400
++++ nfs-utils-1.2.3/utils/gssd/gssd_proc.c	2015-04-01 08:31:32.846748735 -0400
+@@ -300,15 +300,11 @@ destroy_client(struct clnt_info *clp)
+ 	if (clp->krb5_poll_index != -1)
+ 		memset(&pollarray[clp->krb5_poll_index], 0,
+ 					sizeof(struct pollfd));
+-	if (clp->spkm3_poll_index != -1)
+-		memset(&pollarray[clp->spkm3_poll_index], 0,
+-					sizeof(struct pollfd));
+ 	if (clp->gssd_poll_index != -1)
+ 		memset(&pollarray[clp->gssd_poll_index], 0,
+ 					sizeof(struct pollfd));
+ 	if (clp->dir_fd != -1) close(clp->dir_fd);
+ 	if (clp->krb5_fd != -1) close(clp->krb5_fd);
+-	if (clp->spkm3_fd != -1) close(clp->spkm3_fd);
+ 	if (clp->gssd_fd != -1) close(clp->gssd_fd);
+ 	free(clp->dirname);
+ 	free(clp->servicename);
+@@ -328,10 +324,8 @@ insert_new_clnt(void)
+ 		goto out;
+ 	}
+ 	clp->krb5_poll_index = -1;
+-	clp->spkm3_poll_index = -1;
+ 	clp->gssd_poll_index = -1;
+ 	clp->krb5_fd = -1;
+-	clp->spkm3_fd = -1;
+ 	clp->gssd_fd = -1;
+ 	clp->dir_fd = -1;
+ 
+@@ -356,30 +350,22 @@ process_clnt_dir_files(struct clnt_info 
+ 			snprintf(name, sizeof(name), "%s/krb5", clp->dirname);
+ 			clp->krb5_fd = open(name, O_RDWR);
+ 		}
+-		if (clp->spkm3_fd == -1) {
+-			snprintf(name, sizeof(name), "%s/spkm3", clp->dirname);
+-			clp->spkm3_fd = open(name, O_RDWR);
+-		}
+ 
+ 		/* If we opened a gss-specific pipe, let's try opening
+ 		 * the new upcall pipe again. If we succeed, close
+ 		 * gss-specific pipe(s).
+ 		 */
+-		if (clp->krb5_fd != -1 || clp->spkm3_fd != -1) {
++		if (clp->krb5_fd != -1) {
+ 			clp->gssd_fd = open(gname, O_RDWR);
+ 			if (clp->gssd_fd != -1) {
+ 				if (clp->krb5_fd != -1)
+ 					close(clp->krb5_fd);
+ 				clp->krb5_fd = -1;
+-				if (clp->spkm3_fd != -1)
+-					close(clp->spkm3_fd);
+-				clp->spkm3_fd = -1;
+ 			}
+ 		}
+ 	}
+ 
+-	if ((clp->krb5_fd == -1) && (clp->spkm3_fd == -1) &&
+-			(clp->gssd_fd == -1))
++	if ((clp->krb5_fd == -1) && (clp->gssd_fd == -1))
+ 		return -1;
+ 	snprintf(info_file_name, sizeof(info_file_name), "%s/info",
+ 			clp->dirname);
+@@ -431,15 +417,6 @@ insert_clnt_poll(struct clnt_info *clp)
+ 		pollarray[clp->krb5_poll_index].events |= POLLIN;
+ 	}
+ 
+-	if ((clp->spkm3_fd != -1) && (clp->spkm3_poll_index == -1)) {
+-		if (get_poll_index(&clp->spkm3_poll_index)) {
+-			printerr(0, "ERROR: Too many spkm3 clients\n");
+-			return -1;
+-		}
+-		pollarray[clp->spkm3_poll_index].fd = clp->spkm3_fd;
+-		pollarray[clp->spkm3_poll_index].events |= POLLIN;
+-	}
+-
+ 	return 0;
+ }
+ 
+@@ -842,13 +819,6 @@ int create_auth_rpc_client(struct clnt_i
+ 		sec.mech = (gss_OID)&krb5oid;
+ 		sec.req_flags = GSS_C_MUTUAL_FLAG;
+ 	}
+-	else if (authtype == AUTHTYPE_SPKM3) {
+-		sec.mech = (gss_OID)&spkm3oid;
+-		/* XXX sec.req_flags = GSS_C_ANON_FLAG;
+-		 * Need a way to switch....
+-		 */
+-		sec.req_flags = GSS_C_MUTUAL_FLAG;
+-	}
+ 	else {
+ 		printerr(0, "ERROR: Invalid authentication type (%d) "
+ 			"in create_auth_rpc_client\n", authtype);
+@@ -922,9 +892,8 @@ int create_auth_rpc_client(struct clnt_i
+ 	auth = authgss_create_default(rpc_clnt, clp->servicename, &sec);
+ 	if (!auth) {
+ 		/* Our caller should print appropriate message */
+-		printerr(2, "WARNING: Failed to create %s context for "
++		printerr(2, "WARNING: Failed to create krb5 context for "
+ 			    "user with uid %d for server %s\n",
+-			(authtype == AUTHTYPE_KRB5 ? "krb5":"spkm3"),
+ 			 uid, clp->servername);
+ 		goto out_fail;
+ 	}
+@@ -1116,59 +1085,6 @@ out_return_error:
+ 	goto out;
+ }
+ 
+-/*
+- * this code uses the userland rpcsec gss library to create an spkm3
+- * context on behalf of the kernel
+- */
+-static void
+-process_spkm3_upcall(struct clnt_info *clp, uid_t uid, int fd)
+-{
+-	CLIENT			*rpc_clnt = NULL;
+-	AUTH			*auth = NULL;
+-	struct authgss_private_data pd;
+-	gss_buffer_desc		token;
+-
+-	printerr(2, "handling spkm3 upcall (%s)\n", clp->dirname);
+-
+-	token.length = 0;
+-	token.value = NULL;
+-
+-	if (create_auth_rpc_client(clp, &rpc_clnt, &auth, uid, AUTHTYPE_SPKM3)) {
+-		printerr(0, "WARNING: Failed to create spkm3 context for "
+-			    "user with uid %d\n", uid);
+-		goto out_return_error;
+-	}
+-
+-	if (!authgss_get_private_data(auth, &pd)) {
+-		printerr(0, "WARNING: Failed to obtain authentication "
+-			    "data for user with uid %d for server %s\n",
+-			 uid, clp->servername);
+-		goto out_return_error;
+-	}
+-
+-	if (serialize_context_for_kernel(pd.pd_ctx, &token, &spkm3oid, NULL)) {
+-		printerr(0, "WARNING: Failed to serialize spkm3 context for "
+-			    "user with uid %d for server\n",
+-			 uid, clp->servername);
+-		goto out_return_error;
+-	}
+-
+-	do_downcall(fd, uid, &pd, &token, 0);
+-
+-out:
+-	if (token.value)
+-		free(token.value);
+-	if (auth)
+-		AUTH_DESTROY(auth);
+-	if (rpc_clnt)
+-		clnt_destroy(rpc_clnt);
+-	return;
+-
+-out_return_error:
+-	do_error_downcall(fd, uid, -1);
+-	goto out;
+-}
+-
+ void
+ handle_krb5_upcall(struct clnt_info *clp)
+ {
+@@ -1184,20 +1100,6 @@ handle_krb5_upcall(struct clnt_info *clp
+ }
+ 
+ void
+-handle_spkm3_upcall(struct clnt_info *clp)
+-{
+-	uid_t			uid;
+-
+-	if (read(clp->spkm3_fd, &uid, sizeof(uid)) < (ssize_t)sizeof(uid)) {
+-		printerr(0, "WARNING: failed reading uid from spkm3 "
+-			 "upcall pipe: %s\n", strerror(errno));
+-		return;
+-	}
+-
+-	return process_spkm3_upcall(clp, uid, clp->spkm3_fd);
+-}
+-
+-void
+ handle_gssd_upcall(struct clnt_info *clp)
+ {
+ 	uid_t			uid;
+@@ -1305,8 +1207,6 @@ handle_gssd_upcall(struct clnt_info *clp
+ 
+ 	if (strcmp(mech, "krb5") == 0 && clp->servername)
+ 		process_krb5_upcall(clp, uid, clp->gssd_fd, target, service);
+-	else if (strcmp(mech, "spkm3") == 0)
+-		process_spkm3_upcall(clp, uid, clp->gssd_fd);
+ 	else {
+ 		if (clp->servername)
+ 			printerr(0, "WARNING: handle_gssd_upcall: "
+diff -up nfs-utils-1.2.3/utils/gssd/gss_oids.c.orig nfs-utils-1.2.3/utils/gssd/gss_oids.c
+--- nfs-utils-1.2.3/utils/gssd/gss_oids.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/gss_oids.c	2015-04-01 08:31:32.845748718 -0400
+@@ -38,6 +38,3 @@
+ /* from kerberos source, gssapi_krb5.c */
+ gss_OID_desc krb5oid =
+    {9, "\052\206\110\206\367\022\001\002\002"};
+-
+-gss_OID_desc spkm3oid =
+-   {7, "\053\006\001\005\005\001\003"};
+diff -up nfs-utils-1.2.3/utils/gssd/Makefile.am.orig nfs-utils-1.2.3/utils/gssd/Makefile.am
+--- nfs-utils-1.2.3/utils/gssd/Makefile.am.orig	2015-04-01 08:30:59.404172840 -0400
++++ nfs-utils-1.2.3/utils/gssd/Makefile.am	2015-04-01 08:31:32.844748701 -0400
+@@ -17,7 +17,6 @@ COMMON_SRCS = \
+ 	context_mit.c \
+ 	context_heimdal.c \
+ 	context_lucid.c \
+-	context_spkm3.c \
+ 	gss_util.c \
+ 	gss_oids.c \
+ 	err_util.c \
+diff -up nfs-utils-1.2.3/utils/gssd/svcgssd_mech2file.c.orig nfs-utils-1.2.3/utils/gssd/svcgssd_mech2file.c
+--- nfs-utils-1.2.3/utils/gssd/svcgssd_mech2file.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/svcgssd_mech2file.c	2015-04-01 08:31:32.846748735 -0400
+@@ -53,8 +53,6 @@ struct mech2file {
+ 
+ struct mech2file m2f[] = {
+ 	{{9, "\052\206\110\206\367\022\001\002\002"}, "krb5"},
+-	{{7, "\053\006\001\005\005\001\003"}, "spkm3"},
+-	{{7, "\053\006\001\005\005\001\009"}, "lipkey"},
+ 	{{0,0},""},
+ };
+ 
+diff -up nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c.orig nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c
+--- nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c.orig	2015-04-01 08:30:59.405172857 -0400
++++ nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c	2015-04-01 08:31:32.846748735 -0400
+@@ -369,13 +369,10 @@ get_hostbased_client_name(gss_name_t cli
+ 	if (g_OID_equal(&krb5oid, mech)) {
+ 		if (get_krb5_hostbased_name(&name, &cname) == 0)
+ 			*hostbased_name = cname;
++	} else {
++		printerr(1, "WARNING: unknown/unsupport mech OID\n");
+ 	}
+ 
+-	/* No support for SPKM3, just print a warning (for now) */
+-	if (g_OID_equal(&spkm3oid, mech)) {
+-		printerr(1, "WARNING: get_hostbased_client_name: "
+-			 "no hostbased_name support for SPKM3\n");
+-	}
+ 
+ 	res = 0;
+ out_rel_buf:
+diff -up nfs-utils-1.2.3/utils/mount/nfs.man.orig nfs-utils-1.2.3/utils/mount/nfs.man
+--- nfs-utils-1.2.3/utils/mount/nfs.man.orig	2015-04-01 08:30:59.434173357 -0400
++++ nfs-utils-1.2.3/utils/mount/nfs.man	2015-04-01 08:31:32.847748752 -0400
+@@ -374,14 +374,8 @@ Valid security flavors are
+ .BR sys ,
+ .BR krb5 ,
+ .BR krb5i ,
+-.BR krb5p ,
+-.BR lkey ,
+-.BR lkeyi ,
+-.BR lkeyp ,
+-.BR spkm ,
+-.BR spkmi ,
+ and
+-.BR spkmp .
++.BR krb5p ,
+ Refer to the SECURITY CONSIDERATIONS section for details.
+ .TP 1.5i
+ .BR sharecache " / " nosharecache
+@@ -1430,7 +1424,7 @@ security flavor encrypts every RPC reque
+ to prevent data exposure during network transit; however,
+ expect some performance impact
+ when using integrity checking or encryption.
+-Similar support for other forms of cryptographic security (such as lipkey and SPKM3)
++Similar support for other forms of cryptographic security
+ is also available.
+ .P
+ The NFS version 4 protocol allows
+diff -up nfs-utils-1.2.3/utils/mount/nfsmount.c.orig nfs-utils-1.2.3/utils/mount/nfsmount.c
+--- nfs-utils-1.2.3/utils/mount/nfsmount.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/mount/nfsmount.c	2015-04-01 08:31:32.847748752 -0400
+@@ -294,18 +294,6 @@ parse_options(char *old_opts, struct nfs
+ 					data->pseudoflavor = AUTH_GSS_KRB5I;
+ 				else if (!strcmp(secflavor, "krb5p"))
+ 					data->pseudoflavor = AUTH_GSS_KRB5P;
+-				else if (!strcmp(secflavor, "lipkey"))
+-					data->pseudoflavor = AUTH_GSS_LKEY;
+-				else if (!strcmp(secflavor, "lipkey-i"))
+-					data->pseudoflavor = AUTH_GSS_LKEYI;
+-				else if (!strcmp(secflavor, "lipkey-p"))
+-					data->pseudoflavor = AUTH_GSS_LKEYP;
+-				else if (!strcmp(secflavor, "spkm3"))
+-					data->pseudoflavor = AUTH_GSS_SPKM;
+-				else if (!strcmp(secflavor, "spkm3i"))
+-					data->pseudoflavor = AUTH_GSS_SPKMI;
+-				else if (!strcmp(secflavor, "spkm3p"))
+-					data->pseudoflavor = AUTH_GSS_SPKMP;
+ 				else if (sloppy)
+ 					continue;
+ 				else {
+diff -up nfs-utils-1.2.3/utils/mount/nfs_mount.h.orig nfs-utils-1.2.3/utils/mount/nfs_mount.h
+--- nfs-utils-1.2.3/utils/mount/nfs_mount.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/mount/nfs_mount.h	2015-04-01 08:31:32.847748752 -0400
+@@ -75,9 +75,6 @@ struct nfs_mount_data {
+ #define AUTH_GSS_LKEY		390006
+ #define AUTH_GSS_LKEYI		390007
+ #define AUTH_GSS_LKEYP		390008
+-#define AUTH_GSS_SPKM		390009
+-#define AUTH_GSS_SPKMI		390010
+-#define AUTH_GSS_SPKMP		390011
+ #endif
+ 
+ int	nfsmount(const char *, const char *, int , char **, int, int);

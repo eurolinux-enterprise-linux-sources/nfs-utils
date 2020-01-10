@@ -1,0 +1,65 @@
+diff -up nfs-utils-1.2.3/utils/gssd/gssd.c.orig nfs-utils-1.2.3/utils/gssd/gssd.c
+--- nfs-utils-1.2.3/utils/gssd/gssd.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/gssd.c	2012-10-11 12:32:14.627330000 -0400
+@@ -100,9 +100,14 @@ main(int argc, char *argv[])
+ 	int i;
+ 	extern char *optarg;
+ 	char *progname;
++#ifdef HAVE_SET_ALLOWABLE_ENCTYPES
++ 	const char *opts = "fvrmnMp:k:d:t:R:l";
++#else
++ 	const char *opts = "fvrmnMp:k:d:t:R";
++#endif
+ 
+ 	memset(ccachesearch, 0, sizeof(ccachesearch));
+-	while ((opt = getopt(argc, argv, "fvrmnMp:k:d:t:R:")) != -1) {
++	while ((opt = getopt(argc, argv, opts)) != -1) {
+ 		switch (opt) {
+ 			case 'f':
+ 				fg = 1;
+@@ -143,6 +148,11 @@ main(int argc, char *argv[])
+ 			case 'R':
+ 				preferred_realm = strdup(optarg);
+ 				break;
++#ifdef HAVE_SET_ALLOWABLE_ENCTYPES
++			case 'l':
++				limit_to_legacy_enctypes = 1;
++				break;
++#endif
+ 			default:
+ 				usage(argv[0]);
+ 				break;
+diff -up nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig nfs-utils-1.2.3/utils/gssd/krb5_util.c
+--- nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig	2012-10-11 11:39:05.324940000 -0400
++++ nfs-utils-1.2.3/utils/gssd/krb5_util.c	2012-10-11 12:32:14.617331000 -0400
+@@ -129,6 +129,10 @@
+ /* Global list of principals/cache file names for machine credentials */
+ struct gssd_k5_kt_princ *gssd_k5_kt_princ_list = NULL;
+ 
++#ifdef HAVE_SET_ALLOWABLE_ENCTYPES
++int limit_to_legacy_enctypes = 0;
++#endif
++
+ /*==========================*/
+ /*===  Internal routines ===*/
+ /*==========================*/
+@@ -1349,7 +1353,7 @@ limit_krb5_enctypes(struct rpc_gss_sec *
+ 	 * If we failed for any reason to produce global
+ 	 * list of supported enctypes, use local default here.
+ 	 */
+-	if (krb5_enctypes == NULL)
++	if (krb5_enctypes == NULL || limit_to_legacy_enctypes)
+ 		maj_stat = gss_set_allowable_enctypes(&min_stat, credh,
+ 					&krb5oid, num_enctypes, enctypes);
+ 	else
+diff -up nfs-utils-1.2.3/utils/gssd/krb5_util.h.orig nfs-utils-1.2.3/utils/gssd/krb5_util.h
+--- nfs-utils-1.2.3/utils/gssd/krb5_util.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/gssd/krb5_util.h	2012-10-11 12:32:14.603335000 -0400
+@@ -36,6 +36,7 @@ char *gssd_k5_err_msg(krb5_context conte
+ void gssd_k5_get_default_realm(char **def_realm);
+ 
+ #ifdef HAVE_SET_ALLOWABLE_ENCTYPES
++extern int limit_to_legacy_enctypes;
+ int limit_krb5_enctypes(struct rpc_gss_sec *sec);
+ #endif
+ 

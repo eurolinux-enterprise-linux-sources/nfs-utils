@@ -1,0 +1,31 @@
+diff -up nfs-utils-1.2.3/support/nfs/exports.c.orig nfs-utils-1.2.3/support/nfs/exports.c
+--- nfs-utils-1.2.3/support/nfs/exports.c.orig	2015-03-07 10:50:53.933215333 -0500
++++ nfs-utils-1.2.3/support/nfs/exports.c	2015-03-07 10:51:13.665560445 -0500
+@@ -158,6 +158,7 @@ getexportent(int fromkernel, int fromexp
+ 		}
+ 	}
+ 
++	xfree(ee.e_hostname);
+ 	ee = def_ee;
+ 
+ 	/* Check for default client */
+@@ -181,7 +182,6 @@ getexportent(int fromkernel, int fromexp
+ 		if (!has_default_opts)
+ 			xlog(L_WARNING, "No options for %s %s: suggest %s(sync) to avoid warning", ee.e_path, exp, exp);
+ 	}
+-	xfree(ee.e_hostname);
+ 	ee.e_hostname = xstrdup(hostname);
+ 
+ 	if (parseopts(opt, &ee, fromexports && !has_default_subtree_opts, NULL) < 0)
+diff -up nfs-utils-1.2.3/utils/mountd/v4root.c.orig nfs-utils-1.2.3/utils/mountd/v4root.c
+--- nfs-utils-1.2.3/utils/mountd/v4root.c.orig	2015-03-07 10:50:53.822213395 -0500
++++ nfs-utils-1.2.3/utils/mountd/v4root.c	2015-03-07 10:59:11.553904111 -0500
+@@ -85,7 +85,7 @@ v4root_create(char *path, nfs_export *ex
+ 	struct exportent *curexp = &export->m_export;
+ 
+ 	dupexportent(&eep, &pseudo_root.m_export);
+-	eep.e_hostname = strdup(curexp->e_hostname);
++	eep.e_hostname = curexp->e_hostname;
+ 	strncpy(eep.e_path, path, sizeof(eep.e_path));
+ 	if (strcmp(path, "/") != 0)
+ 		eep.e_flags &= ~NFSEXP_FSID;

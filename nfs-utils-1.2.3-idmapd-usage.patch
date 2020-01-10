@@ -1,0 +1,45 @@
+diff -up nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig nfs-utils-1.2.3/utils/idmapd/idmapd.c
+--- nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig	2015-12-19 09:17:33.391162852 -0500
++++ nfs-utils-1.2.3/utils/idmapd/idmapd.c	2015-12-19 09:37:13.226828771 -0500
+@@ -203,6 +203,12 @@ flush_nfsd_idmap_cache(void)
+ 	return ret;
+ }
+ 
++void usage(char *progname)
++{
++	fprintf(stderr, "Usage: %s [-fvCS] [-p path] [-c path]\n",
++		basename(progname));
++}
++
+ int
+ main(int argc, char **argv)
+ {
+@@ -236,9 +242,11 @@ main(int argc, char **argv)
+ 			conf_path = optarg;
+ 		if (opt == '?') {
+ 			if (strchr(GETOPTSTR, optopt))
+-				errx(1, "'-%c' option requires an argument.", optopt);
++				warnx("'-%c' option requires an argument.", optopt);
+ 			else
+-				errx(1, "'-%c' is an invalid argument.", optopt);
++				warnx("'-%c' is an invalid argument.", optopt);
++			usage(progname);
++			exit(1);
+ 		}
+ 	}
+ 	optind = 1;
+diff -up nfs-utils-1.2.3/utils/idmapd/idmapd.man.orig nfs-utils-1.2.3/utils/idmapd/idmapd.man
+--- nfs-utils-1.2.3/utils/idmapd/idmapd.man.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/idmapd/idmapd.man	2015-12-19 09:39:23.910450024 -0500
+@@ -10,8 +10,10 @@
+ .Sh SYNOPSIS
+ .\" For a program:  program [-abc] file ...
+ .Nm rpc.idmapd
+-.Op Fl v
+ .Op Fl f
++.Op Fl v
++.Op Fl C
++.Op Fl S
+ .Op Fl d Ar domain
+ .Op Fl p Ar path
+ .Op Fl U Ar username

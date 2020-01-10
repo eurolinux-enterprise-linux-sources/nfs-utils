@@ -1,0 +1,123 @@
+diff -up nfs-utils-1.2.3/support/include/exportfs.h.orig nfs-utils-1.2.3/support/include/exportfs.h
+--- nfs-utils-1.2.3/support/include/exportfs.h.orig	2015-03-10 13:42:16.390000001 -0400
++++ nfs-utils-1.2.3/support/include/exportfs.h	2015-03-10 13:48:56.438003344 -0400
+@@ -177,6 +177,7 @@ struct export_features {
+ };
+ 
+ struct export_features *get_export_features(void);
++void fix_pseudoflavor_flags(struct exportent *ep);
+ 
+ /* Record export error.  */
+ extern int export_errno;
+diff -up nfs-utils-1.2.3/support/nfs/exports.c.orig nfs-utils-1.2.3/support/nfs/exports.c
+--- nfs-utils-1.2.3/support/nfs/exports.c.orig	2015-03-10 13:42:16.432000001 -0400
++++ nfs-utils-1.2.3/support/nfs/exports.c	2015-03-10 13:48:56.438003344 -0400
+@@ -69,6 +69,7 @@ static int	parsesquash(char *list, int *
+ static int	parsenum(char **cpp);
+ static void	freesquash(void);
+ static void	syntaxerr(char *msg);
++static struct flav_info *find_flavor(char *name);
+ 
+ void
+ setexportent(char *fname, char *type)
+@@ -202,6 +203,8 @@ void secinfo_show(FILE *fp, struct expor
+ 	struct sec_entry *p1, *p2;
+ 	int flags;
+ 
++	if (ep->e_secinfo[0].flav == NULL)
++		secinfo_addflavor(find_flavor("sys"), ep);
+ 	for (p1=ep->e_secinfo; p1->flav; p1=p2) {
+ 
+ 		fprintf(fp, ",sec=%s", p1->flav->flavour);
+@@ -472,7 +475,7 @@ static void clearflags(int mask, unsigne
+  * ensure that the export flags agree with the flags on each
+  * pseudoflavor:
+  */
+-static void fix_pseudoflavor_flags(struct exportent *ep)
++void fix_pseudoflavor_flags(struct exportent *ep)
+ {
+ 	struct export_features *ef;
+ 	struct sec_entry *p;
+diff -up nfs-utils-1.2.3/utils/mountd/auth.c.orig nfs-utils-1.2.3/utils/mountd/auth.c
+--- nfs-utils-1.2.3/utils/mountd/auth.c.orig	2015-03-10 13:42:16.412000001 -0400
++++ nfs-utils-1.2.3/utils/mountd/auth.c	2015-03-10 13:48:56.439003237 -0400
+@@ -185,6 +185,9 @@ auth_authenticate_newcache(const struct 
+ 			if (exp->m_export.e_flags & NFSEXP_V4ROOT)
+ 				/* not acceptable for v[23] export */
+ 				continue;
++			if (exp->m_export.e_flags & NFSEXP_V4ROOT)
++				/* not acceptable for v[23] export */
++				continue;
+ 			break;
+ 		}
+ 	*error = not_exported;
+diff -up nfs-utils-1.2.3/utils/mountd/cache.c.orig nfs-utils-1.2.3/utils/mountd/cache.c
+--- nfs-utils-1.2.3/utils/mountd/cache.c.orig	2015-03-10 13:42:16.409000001 -0400
++++ nfs-utils-1.2.3/utils/mountd/cache.c	2015-03-10 13:48:56.439003237 -0400
+@@ -599,6 +599,15 @@ static void nfsd_fh(FILE *f)
+ 			{
+ 				xlog(L_WARNING, "%s and %s have same filehandle for %s, using first",
+ 				     found_path, path, dom);
++			} else {
++				/* same path, if one is V4ROOT, choose the other */
++				if (found->e_flags & NFSEXP_V4ROOT) {
++					found = &exp->m_export;
++					free(found_path);
++					found_path = strdup(path);
++					if (found_path == NULL)
++						goto out;
++				}
+ 			}
+ 		}
+ 	}
+@@ -683,6 +692,7 @@ static void write_secinfo(FILE *f, struc
+ 		/* There was no sec= option */
+ 		return;
+ 	}
++	fix_pseudoflavor_flags(ep);
+ 	qword_print(f, "secinfo");
+ 	qword_printint(f, p - ep->e_secinfo);
+ 	for (p = ep->e_secinfo; p->flav; p++) {
+@@ -762,10 +772,14 @@ lookup_export(char *dom, char *path, str
+ 				found_type = i;
+ 				continue;
+ 			}
+-
+-			/* Always prefer non-V4ROOT mounts */
+-			if (found->m_export.e_flags & NFSEXP_V4ROOT)
++			/* Always prefer non-V4ROOT exports */
++			if (exp->m_export.e_flags & NFSEXP_V4ROOT)
++				continue;
++			if (found->m_export.e_flags & NFSEXP_V4ROOT) {
++				found = exp;
++				found_type = i;
+ 				continue;
++			}
+ 
+ 			/* If one is a CROSSMOUNT, then prefer the longest path */
+ 			if (((found->m_export.e_flags & NFSEXP_CROSSMOUNT) ||
+diff -up nfs-utils-1.2.3/utils/mountd/v4root.c.orig nfs-utils-1.2.3/utils/mountd/v4root.c
+--- nfs-utils-1.2.3/utils/mountd/v4root.c.orig	2015-03-10 13:42:16.426000001 -0400
++++ nfs-utils-1.2.3/utils/mountd/v4root.c	2015-03-10 13:51:42.521988515 -0400
+@@ -46,6 +46,7 @@ static nfs_export pseudo_root = {
+ 		.e_nsqgids = 0,
+ 		.e_fsid = 0,
+ 		.e_mountpoint = NULL,
++		.e_ttl = DEFAULT_TTL,
+ 	},
+ 	.m_exported = 0,
+ 	.m_xtabent = 1,
+@@ -192,6 +193,13 @@ v4root_set()
+ 				 */
+ 				continue;
+ 
++			if (strcmp(exp->m_export.e_path, "/") == 0 &&
++			    !(exp->m_export.e_flags & NFSEXP_FSID)) {
++				/* Force '/' to be exported as fsid == 0*/
++				exp->m_export.e_flags |= NFSEXP_FSID;
++				exp->m_export.e_fsid = 0;
++			}
++
+ 			ret = v4root_add_parents(exp);
+ 			/* XXX: error handling! */
+ 		}

@@ -1,0 +1,15 @@
+diff -up nfs-utils-1.2.3/tools/nfs-iostat/nfs-iostat.py.orig nfs-utils-1.2.3/tools/nfs-iostat/nfs-iostat.py
+--- nfs-utils-1.2.3/tools/nfs-iostat/nfs-iostat.py.orig	2014-08-25 12:55:39.006578312 -0400
++++ nfs-utils-1.2.3/tools/nfs-iostat/nfs-iostat.py	2014-08-25 13:20:46.532578261 -0400
+@@ -241,7 +241,10 @@ class DeviceData:
+             opens = float(nfs_stats['vfsopen'])
+             revalidates = float(nfs_stats['inoderevalidates']) - opens
+             if revalidates != 0:
+-                ratio = ((revalidates - getattr_ops) * 100) / revalidates
++                if revalidates < getattr_ops:
++					ratio = ((getattr_ops - revalidates ) * 100) / revalidates
++                else:
++					ratio = ((revalidates - getattr_ops) * 100) / revalidates
+             else:
+                 ratio = 0.0
+ 

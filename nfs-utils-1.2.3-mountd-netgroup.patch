@@ -1,0 +1,31 @@
+diff -up nfs-utils-1.2.3/support/export/client.c.save nfs-utils-1.2.3/support/export/client.c
+--- nfs-utils-1.2.3/support/export/client.c.save	2015-12-19 10:00:18.858622957 -0500
++++ nfs-utils-1.2.3/support/export/client.c	2015-12-19 10:02:05.689766236 -0500
+@@ -635,7 +635,7 @@ check_netgroup(const nfs_client *clp, co
+ 	const char *netgroup = clp->m_hostname + 1;
+ 	struct addrinfo *tmp = NULL;
+ 	struct hostent *hp;
+-	char *dot, *hname;
++	char *dot, *hname, *ip;
+ 	int i, match;
+ 
+ 	match = 0;
+@@ -682,6 +682,18 @@ check_netgroup(const nfs_client *clp, co
+ 		}
+ 	}
+ 
++	/* check whether the IP itself is in the netgroup */
++	ip = calloc(INET6_ADDRSTRLEN, 1);
++	if (inet_ntop(ai->ai_family, &(((struct sockaddr_in *)ai->ai_addr)->sin_addr), ip, INET6_ADDRSTRLEN) == ip) {
++		if (innetgr(netgroup, ip, NULL, NULL)) {
++			free(hname);
++			hname = ip;
++			match = 1;
++			goto out;
++		}
++	}
++	free(ip);
++
+ 	/* Okay, strip off the domain (if we have one) */
+ 	dot = strchr(hname, '.');
+ 	if (dot == NULL)

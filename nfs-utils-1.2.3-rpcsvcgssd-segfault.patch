@@ -1,0 +1,26 @@
+commit 2e4a7e9b50a641dc8640a5dd911ee4a2f0b2c073
+Author: Steve Dickson <steved@redhat.com>
+Date:   Tue Apr 19 12:31:30 2011 -0400
+
+    rpc.svcgssd: Segmentation fault on error
+    
+    Commit 544ed73d introduced a regression that caused
+    rpc.svcgssd to seg fault on "Wrong principal in request"
+    errors in gss_accept_sec_context()
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/gssd/gss_util.c b/utils/gssd/gss_util.c
+index ca27d61..0e327b0 100644
+--- a/utils/gssd/gss_util.c
++++ b/utils/gssd/gss_util.c
+@@ -252,7 +252,8 @@ display_status_2(char *m, u_int32_t major, u_int32_t minor, const gss_OID mech)
+ 
+ 	if (major == GSS_S_CREDENTIALS_EXPIRED)
+ 		msg_verbosity = 1;
+-	printerr(msg_verbosity, "ERROR: GSS-API: error in %s(): %s (%s) - %s(%s)\n",
++
++	printerr(msg_verbosity, "ERROR: GSS-API: error in %s(): %s (%s) - %s\n",
+ 		 m, gss_display_error(major), maj, min);
+ 
+ 	if (maj_gss_buf.length != 0)

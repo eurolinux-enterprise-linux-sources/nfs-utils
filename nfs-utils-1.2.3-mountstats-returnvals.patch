@@ -1,0 +1,85 @@
+diff -up nfs-utils-1.2.3/tools/mountstats/mountstats.py.save nfs-utils-1.2.3/tools/mountstats/mountstats.py
+--- nfs-utils-1.2.3/tools/mountstats/mountstats.py.save	2015-03-03 11:12:42.406991000 -0500
++++ nfs-utils-1.2.3/tools/mountstats/mountstats.py	2015-03-03 11:13:19.963104000 -0500
+@@ -187,7 +187,6 @@ Nfsv4ops = [
+     'FS_LOCATIONS',
+     'RELEASE_LOCKOWNER',
+     'SECINFO',
+-    'FSID_PRESENT',
+     'EXCHANGE_ID',
+     'CREATE_SESSION',
+     'DESTROY_SESSION',
+@@ -198,12 +197,7 @@ Nfsv4ops = [
+     'GETDEVICEINFO',
+     'LAYOUTCOMMIT',
+     'LAYOUTRETURN',
+-    'SECINFO_NO_NAME',
+-    'TEST_STATEID',
+-    'FREE_STATEID',
+-    'GETDEVICELIST',
+-    'BIND_CONN_TO_SESSION',
+-    'DESTROY_CLIENTID'
++    'FREE_STATEID'
+ ]
+ 
+ class DeviceData:
+@@ -704,7 +698,7 @@ def mountstats_command(args):
+                 mountpoints += [device]
+     if len(mountpoints) == 0:
+         print('No NFS mount points were found')
+-        return
++        return 1
+ 
+     if args.since:
+         old_mountstats = parse_stats_file(args.since)
+@@ -725,6 +719,7 @@ def mountstats_command(args):
+     args.infile.close()
+     if args.since:
+         args.since.close()
++    return 0
+ 
+ def nfsstat_command(args):
+     """nfsstat-like command for NFS mount points
+@@ -762,7 +757,7 @@ def nfsstat_command(args):
+                 mountpoints += [device]
+     if len(mountpoints) == 0:
+         print('No NFS mount points were found')
+-        return
++        return 1
+ 
+     if args.since:
+         old_mountstats = parse_stats_file(args.since)
+@@ -799,6 +794,7 @@ def nfsstat_command(args):
+     args.infile.close()
+     if args.since:
+         args.since.close()
++    return 0
+ 
+ def print_iostat_summary(old, new, devices, time):
+     for device in devices:
+@@ -843,7 +839,7 @@ def iostat_command(args):
+                 devices += [device]
+     if len(devices) == 0:
+         print('No NFS mount points were found')
+-        return
++        return 1
+ 
+     sample_time = 0
+ 
+@@ -871,6 +867,7 @@ def iostat_command(args):
+     args.infile.close()
+     if args.since:
+         args.since.close()
++    return 0
+ 
+ class ICMAction(argparse.Action):
+     """Custom action to deal with interval, count, and mountpoints.
+@@ -982,7 +979,7 @@ try:
+         sys.stdout.close()
+         sys.stderr.close()
+         sys.exit(res)
+-except (SystemExit, KeyboardInterrupt, RuntimeError):
++except (KeyboardInterrupt, RuntimeError):
+     sys.exit(1)
+ except IOError:
+     pass

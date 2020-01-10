@@ -1,0 +1,15 @@
+diff -up nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c.orig nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c
+--- nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c.orig	2015-11-18 06:35:15.129184611 -0500
++++ nfs-utils-1.2.3/utils/nfsidmap/nfsidmap.c	2015-11-18 06:35:56.081009516 -0500
+@@ -330,7 +330,10 @@ int main(int argc, char **argv)
+ 	}
+ 	type = strtok(arg, ":");
+ 	value = strtok(NULL, ":");
+-
++    if (value == NULL) {
++		xlog_err("Error: Null uid/gid value.");
++		return 1;
++	}
+ 	if (verbose) {
+ 		xlog_warn("key: 0x%lx type: %s value: %s timeout %ld",
+ 			key, type, value, timeout);

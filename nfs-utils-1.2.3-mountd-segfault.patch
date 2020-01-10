@@ -1,0 +1,25 @@
+commit 730f6986f86873513fa021a450eb55ccd0f2fbff
+Author: Steve Dickson <steved@redhat.com>
+Date:   Wed Jan 26 07:49:19 2011 -0500
+
+    Fixed segfault in rpc.mountd
+    
+    A unallocated piece of memory, instead of a NULL point, was being
+    used to initialize a ->next point in the mount link list which
+    caused a segfault after a few remote accesses via the showmount
+    command.
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mountd/rmtab.c b/utils/mountd/rmtab.c
+index d339296..527377f 100644
+--- a/utils/mountd/rmtab.c
++++ b/utils/mountd/rmtab.c
+@@ -205,6 +205,7 @@ mountlist_list(void)
+ 	}
+ 	if (stb.st_mtime != last_mtime) {
+ 		mountlist_freeall(mlist);
++		mlist = NULL;
+ 		last_mtime = stb.st_mtime;
+ 
+ 		setrmtabent("r");

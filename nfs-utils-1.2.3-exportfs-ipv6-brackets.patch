@@ -1,0 +1,204 @@
+diff -up nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig nfs-utils-1.2.3/utils/exportfs/exportfs.c
+--- nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig	2014-07-22 08:23:39.000000000 -0400
++++ nfs-utils-1.2.3/utils/exportfs/exportfs.c	2014-07-22 08:24:53.000000000 -0400
+@@ -267,23 +267,13 @@ export_all(int verbose)
+ 
+ 
+ static void
+-exportfs(char *arg, char *options, int verbose)
++exportfs_parsed(char *hname, char *path, char *options, int verbose)
+ {
+ 	struct exportent *eep;
+ 	nfs_export	*exp;
+ 	struct addrinfo	*ai = NULL;
+-	char		*path;
+-	char		*hname = arg;
+ 	int		htype;
+ 
+-	if ((path = strchr(arg, ':')) != NULL)
+-		*path++ = '\0';
+-
+-	if (!path || *path != '/') {
+-		xlog(L_ERROR, "Invalid exporting option: %s", arg);
+-		return;
+-	}
+-
+ 	if ((htype = client_gettype(hname)) == MCL_FQDN) {
+ 		ai = host_addrinfo(hname);
+ 		if (ai != NULL) {
+@@ -313,22 +303,68 @@ out:
+ 	freeaddrinfo(ai);
+ }
+ 
+-static void
+-unexportfs(char *arg, int verbose)
++static int exportfs_generic(char *arg, char *options, int verbose)
+ {
+-	nfs_export	*exp;
+-	struct addrinfo *ai = NULL;
+-	char		*path;
+-	char		*hname = arg;
+-	int		htype;
++	char *path;
+ 
+ 	if ((path = strchr(arg, ':')) != NULL)
+ 		*path++ = '\0';
+ 
+-	if (!path || *path != '/') {
+-		xlog(L_ERROR, "Invalid unexporting option: %s", arg);
+-		return;
+-	}
++	if (!path || *path != '/')
++		return 1;
++
++	exportfs_parsed(arg, path, options, verbose);
++	return 0;
++}
++
++static int exportfs_ipv6(char *arg, char *options, int verbose)
++{
++	char *path, *c, hname[NI_MAXHOST + strlen("/128")];
++
++	arg++;
++	c = strchr(arg, ']');
++	if (c == NULL)
++		return 1;
++
++	memset(hname, '\0', sizeof(hname));
++	strncpy(hname, arg, c - arg);
++
++	/* no colon means this is a wildcarded DNS hostname */
++	if (strchr(hname, ':') == NULL)
++		return exportfs_generic(--arg, options, verbose);
++
++	path = strstr(c, ":/");
++	if (path == NULL)
++		return 1;
++	*path++ = '\0';
++
++	/* if there's anything between the closing brace and the
++	 * path separator, it's probably a prefix length */
++	strcat(hname, ++c);
++
++	exportfs_parsed(hname, path, options, verbose);
++	return 0;
++}
++
++static void
++exportfs(char *arg, char *options, int verbose)
++{
++	int failed;
++
++	if (*arg == '[')
++		failed = exportfs_ipv6(arg, options, verbose);
++	else
++		failed = exportfs_generic(arg, options, verbose);
++	if (failed)
++		xlog(L_ERROR, "Invalid export syntax: %s", arg);
++}
++
++static void
++unexportfs_parsed(char *hname, char *path, int verbose)
++{
++	nfs_export	*exp;
++	struct addrinfo *ai = NULL;
++	int		htype;
+ 
+ 	if ((htype = client_gettype(hname)) == MCL_FQDN) {
+ 		ai = host_addrinfo(hname);
+@@ -372,6 +408,62 @@ unexportfs(char *arg, int verbose)
+ 	freeaddrinfo(ai);
+ }
+ 
++static int unexportfs_generic(char *arg, int verbose)
++{
++	char *path;
++
++	if ((path = strchr(arg, ':')) != NULL)
++		*path++ = '\0';
++
++	if (!path || *path != '/')
++		return 1;
++
++	unexportfs_parsed(arg, path, verbose);
++	return 0;
++}
++
++static int unexportfs_ipv6(char *arg, int verbose)
++{
++	char *path, *c, hname[NI_MAXHOST + strlen("/128")];
++
++	arg++;
++	c = strchr(arg, ']');
++	if (c == NULL)
++		return 1;
++
++	memset(hname, '\0', sizeof(hname));
++	strncpy(hname, arg, c - arg);
++
++	/* no colon means this is a wildcarded DNS hostname */
++	if (strchr(hname, ':') == NULL)
++		return unexportfs_generic(--arg, verbose);
++
++	path = strstr(c, ":/");
++	if (path == NULL)
++		return 1;
++	*path++ = '\0';
++
++	/* if there's anything between the closing brace and the
++	 * path separator, it's probably a prefix length */
++	strcat(hname, ++c);
++
++	unexportfs_parsed(hname, path, verbose);
++	return 0;
++}
++
++static void
++unexportfs(char *arg, int verbose)
++{
++	int failed;
++
++	if (*arg == '[')
++		failed = unexportfs_ipv6(arg, verbose);
++	else
++		failed = unexportfs_generic(arg, verbose);
++	if (failed)
++		xlog(L_ERROR, "Invalid export syntax: %s", arg);
++}
++
+ static int can_test(void)
+ {
+ 	int fd;
+diff -up nfs-utils-1.2.3/utils/exportfs/exportfs.man.orig nfs-utils-1.2.3/utils/exportfs/exportfs.man
+--- nfs-utils-1.2.3/utils/exportfs/exportfs.man.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/exportfs/exportfs.man	2014-07-21 10:42:14.000000000 -0400
+@@ -141,6 +141,14 @@ along with the client or clients who are
+ See
+ .B exports(5)
+ for a description of supported options and access list formats.
++.PP
++IPv6 presentation addresses contain colons, which are already used
++to separate the "host" and "path" command line arguments.
++When specifying a client using a raw IPv6 address,
++enclose the address in square brackets.
++For IPv6 network addresses, place the prefix just after the closing
++bracket.
++.PP
+ To export a directory to the world, simply specify
+ .IR :/path .
+ .PP
+@@ -220,6 +228,14 @@ To unexport all exports listed in
+ .nf
+ .B "# exportfs -au
+ .fi
++.PP
++To export the
++.I /usr/tmp
++directory to IPv6 link-local clients:
++.PP
++.nf
++.B "# exportfs [fe80::]/64:/usr/tmp
++.fi
+ .SH USAGE NOTES
+ Exporting to IP networks or DNS and NIS domains does not enable clients
+ from these groups to access NFS immediately.

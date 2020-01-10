@@ -1,0 +1,43 @@
+diff -up nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig nfs-utils-1.2.3/utils/gssd/krb5_util.c
+--- nfs-utils-1.2.3/utils/gssd/krb5_util.c.orig	2015-11-18 09:13:23.344536617 -0500
++++ nfs-utils-1.2.3/utils/gssd/krb5_util.c	2015-11-18 09:20:47.755937222 -0500
+@@ -791,6 +791,8 @@ find_keytab_entry(krb5_context context, 
+ 	char *k5err = NULL;
+ 	int tried_all = 0, tried_default = 0;
+ 	krb5_principal princ;
++	const char *notsetstr = "not set";
++	char *adhostoverride;
+ 
+ 
+ 	/* Get full target hostname */
+@@ -808,13 +810,24 @@ find_keytab_entry(krb5_context context, 
+ 	}
+ 
+ 	/* Compute the active directory machine name HOST$ */
+-	strcpy(myhostad, myhostname);
+-	for (i = 0; myhostad[i] != 0; ++i) {
+-		if (myhostad[i] == '.') break;
+-		myhostad[i] = toupper(myhostad[i]);
++	krb5_appdefault_string(context, "nfs", NULL, "ad_principal_name", 
++		notsetstr, &adhostoverride);
++	if (strcmp(adhostoverride, notsetstr) != 0) {
++	        printerr (1, 
++				"AD host string overridden with \"%s\" from appdefaults\n", 
++				adhostoverride);
++	        /* No overflow: Windows cannot handle strings longer than 19 chars */
++	        strcpy(myhostad, adhostoverride);
++		free(adhostoverride);
++	} else {
++	        strcpy(myhostad, myhostname);
++	        for (i = 0; myhostad[i] != 0; ++i) {
++	          if (myhostad[i] == '.') break;
++	          myhostad[i] = toupper(myhostad[i]);
++	        }
++	        myhostad[i] = '$';
++	        myhostad[i+1] = 0;
+ 	}
+-	myhostad[i] = '$';
+-	myhostad[i+1] = 0;
+ 
+ 	retval = get_full_hostname(myhostname, myhostname, sizeof(myhostname));
+ 	if (retval)

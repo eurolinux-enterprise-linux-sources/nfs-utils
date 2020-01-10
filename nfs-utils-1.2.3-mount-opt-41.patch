@@ -1,0 +1,73 @@
+diff -up nfs-utils-1.2.3/utils/mount/network.c.orig nfs-utils-1.2.3/utils/mount/network.c
+--- nfs-utils-1.2.3/utils/mount/network.c.orig	2012-11-19 07:50:54.000000000 -0500
++++ nfs-utils-1.2.3/utils/mount/network.c	2012-11-19 10:05:41.000000000 -0500
+@@ -94,6 +94,7 @@ static const char *nfs_version_opttbl[] 
+ 	"v2",
+ 	"v3",
+ 	"v4",
++	"v4.1",
+ 	"vers",
+ 	"nfsvers",
+ 	NULL,
+@@ -1246,11 +1247,20 @@ nfs_nfs_version(struct mount_options *op
+ 	case 2: /* v4 */
+ 		*version = 4;
+ 		return 1;
+-	case 3:	/* vers */
++	case 3: /* v4.1 */
++		*version = 4;
++		po_remove_all(options, "v4.1");
++		po_append(options, "v4,minorversion=1");
++		return 1;
++	case 4:	/* vers */
+ 		switch (po_get_numeric(options, "vers", &tmp)) {
+ 		case PO_FOUND:
+ 			if (tmp >= 2 && tmp <= 4) {
+ 				*version = tmp;
++				if (strcmp(po_get(options, "vers"), "4.1") == 0) {
++					po_remove_all(options, "vers");
++					po_append(options, "vers=4,minorversion=1");
++				}
+ 				return 1;
+ 			}
+ 			nfs_error(_("%s: invalid value for 'vers=' option"),
+@@ -1265,11 +1275,15 @@ nfs_nfs_version(struct mount_options *op
+ 					progname);
+ 			return 0;
+ 		}
+-	case 4: /* nfsvers */
++	case 5: /* nfsvers */
+ 		switch (po_get_numeric(options, "nfsvers", &tmp)) {
+ 		case PO_FOUND:
+ 			if (tmp >= 2 && tmp <= 4) {
+ 				*version = tmp;
++				if (strcmp(po_get(options, "nfsvers"), "4.1") == 0) {
++					po_remove_all(options, "nfsvers");
++					po_append(options, "nfsvers=4,minorversion=1");
++				}
+ 				return 1;
+ 			}
+ 			nfs_error(_("%s: invalid value for 'nfsvers=' option"),
+diff -up nfs-utils-1.2.3/utils/mount/nfs.man.orig nfs-utils-1.2.3/utils/mount/nfs.man
+--- nfs-utils-1.2.3/utils/mount/nfs.man.orig	2012-11-19 07:50:54.000000000 -0500
++++ nfs-utils-1.2.3/utils/mount/nfs.man	2012-11-19 10:08:07.000000000 -0500
+@@ -768,6 +768,19 @@ by 'nolock'/'lock' mount option.
+ Use these options, along with the options in the first subsection above,
+ for NFS version 4 and newer.
+ .TP 1.5i
++.BI minorversion= n
++Specifies the protocol minor version number.
++NFSv4 introduces "minor versioning," where NFS protocol enhancements can
++be introduced without bumping the NFS protocol version number.
++.IP
++The minor version can also be be specified using the
++.B vers=
++option.
++For example, specifying
++.B vers=4.1
++is the same as specifying
++.BR vers=4,minorversion=1 .
++.TP 1.5i
+ .BI proto= netid
+ The transport protocol name and protocol family the NFS client uses
+ to transmit requests to the NFS server for this mount point.

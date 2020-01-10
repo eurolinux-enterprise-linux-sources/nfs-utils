@@ -1,0 +1,33 @@
+commit 54f06bfefc4841657aa585dd791ebd2f65a3c299
+Author: Max Matveev <makc@redhat.com>
+Date:   Tue Aug 16 07:57:43 2011 -0400
+
+    mount.nfs: submarvellous messages from mount.nfs
+    
+    Consider a setup where mountd on the server is controlled via
+    tcp_wrappers (usual RHEL setup) and will not process calls from a
+    particular client because of something in /etc/hosts.deny.
+    
+    When such client attempts to do v3 mount, the error message printed
+    by mount.nfs is misleading.
+    
+    This patch changes that error message from:
+        mount.nfs: Argument list too long
+    to
+        mount.nfs: access denied by server while mounting server:/export
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/stropts.c b/utils/mount/stropts.c
+index f1aa503..4d023d6 100644
+--- a/utils/mount/stropts.c
++++ b/utils/mount/stropts.c
+@@ -538,6 +538,8 @@ nfs_rewrite_pmap_mount_options(struct mount_options *options)
+ 		errno = ESPIPE;
+ 		if (rpc_createerr.cf_stat == RPC_PROGNOTREGISTERED)
+ 			errno = EOPNOTSUPP;
++		else if (rpc_createerr.cf_stat == RPC_AUTHERROR)
++			errno = EACCES;
+ 		else if (rpc_createerr.cf_error.re_errno != 0)
+ 			errno = rpc_createerr.cf_error.re_errno;
+ 		return 0;

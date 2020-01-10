@@ -1,0 +1,59 @@
+diff -up nfs-utils-1.2.3/utils/exportfs/exports.man.save nfs-utils-1.2.3/utils/exportfs/exports.man
+--- nfs-utils-1.2.3/utils/exportfs/exports.man.save	2011-08-11 14:21:20.970214000 -0400
++++ nfs-utils-1.2.3/utils/exportfs/exports.man	2011-08-11 14:26:25.890239000 -0400
+@@ -45,9 +45,11 @@ or restart the NFS server.
+ .SS Machine Name Formats
+ NFS clients may be specified in a number of ways:
+ .IP "single host
+-This is the most common format. You may specify a host either by an
++You may specify a host either by an
+ abbreviated name recognized be the resolver, the fully qualified domain
+-name, or an IP address.
++name, an IPv4 address, or an IPv6 address. IPv6 addresses must not be
++inside square brackets in /etc/exports lest they be confused with
++character-class wildcard matches.
+ .IP "netgroups
+ NIS netgroups may be given as
+ .IR @group .
+@@ -55,7 +57,7 @@ Only the host part of each
+ netgroup members is consider in checking for membership.  Empty host
+ parts or those containing a single dash (\-) are ignored.
+ .IP "wildcards
+-Machine names may contain the wildcard characters \fI*\fR and \fI?\fR.
+++Machine names may contain the wildcard characters \fI*\fR and \fI?\fR, or may contain character class lists within [square brackets].
+ This can be used to make the \fIexports\fR file more compact; for instance,
+ \fI*.cs.foo.edu\fR matches all hosts in the domain
+ \fIcs.foo.edu\fR.  As these characters also match the dots in a domain
+@@ -69,8 +71,10 @@ as
+ where the netmask can be specified in dotted-decimal format, or as a
+ contiguous mask length.
+ For example, either `/255.255.252.0' or `/22' appended
+-to the network base IPv4 address results in identical subnetworks with 10 bits of
+-host. Wildcard characters generally do not work on IP addresses, though they
++to the network base IPv4 address results in identical subnetworks with 10 bits
++of host. IPv6 addresses must use a contiguous mask length and must not be 
++inside square brackets to avoid confusion with character-class wildcards. 
++Wildcard characters generally do not work on IP addresses, though they
+ may work by accident when reverse DNS lookups fail.
+ '''.TP
+ '''.B =public
+@@ -456,6 +460,8 @@ is supposedly that of user joe).
+ /home/joe       pc001(rw,all_squash,anonuid=150,anongid=100)
+ /pub            *(ro,insecure,all_squash)
+ /srv/www        \-sync,rw server @trusted @external(ro)
++/foo            2001:db8:9:e54::/64(rw) 192.0.2.0/24(rw)
++/build          buildhost[0-9].local.domain(rw)
+ '''/pub/private    (noaccess)
+ .fi
+ .PP
+@@ -471,7 +477,9 @@ option in this entry also allows clients
+ don't use a reserved port for NFS.
+ The sixth line exports a directory read-write to the machine 'server'
+ as well as the `@trusted' netgroup, and read-only to netgroup `@external',
+-all three mounts with the `sync' option enabled.
++all three mounts with the `sync' option enabled. The seventh line exports
++a directory to both an IPv6 and an IPv4 subnet. The eighth line demonstrates
++a character class wildcard match.
+ ''' The last line denies all NFS clients
+ '''access to the private directory.
+ '''.SH CAVEATS

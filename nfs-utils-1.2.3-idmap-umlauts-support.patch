@@ -1,0 +1,13 @@
+diff -up nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig nfs-utils-1.2.3/utils/idmapd/idmapd.c
+--- nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig	2012-03-07 13:49:09.259133000 -0500
++++ nfs-utils-1.2.3/utils/idmapd/idmapd.c	2012-03-07 14:02:44.508262000 -0500
+@@ -862,9 +862,6 @@ validateascii(char *string, u_int32_t le
+ 	for (i = 0; i < len; i++) {
+ 		if (string[i] == '\0')
+ 			break;
+-
+-		if (string[i] & 0x80)
+-			return (-1);
+ 	}
+ 
+ 	if ((i >= len) || string[i] != '\0')

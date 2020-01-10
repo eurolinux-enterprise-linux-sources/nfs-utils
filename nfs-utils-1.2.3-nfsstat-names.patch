@@ -1,0 +1,25 @@
+commit 68f7938c85258a8c54b13169dcdeae61cc1bf286
+Author: Steve Dickson <steved@redhat.com>
+Date:   Tue Apr 26 13:32:35 2011 -0400
+
+    nfsstat: Output headings mislabled
+    
+    The badclnt and badauth headers were reversed
+    when the server side rpc stats (-s -o rpc) were
+    displayed.
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/nfsstat/nfsstat.c b/utils/nfsstat/nfsstat.c
+index f31bb81..766cb72 100644
+--- a/utils/nfsstat/nfsstat.c
++++ b/utils/nfsstat/nfsstat.c
+@@ -540,7 +540,7 @@ print_server_stats(int opt_prt)
+ 			;
+ 		} else {
+ 			print_numbers(LABEL_srvrpc
+-				"calls      badcalls   badauth    badclnt    xdrcall\n",
++				"calls      badcalls   badclnt    badauth    xdrcall\n",
+ 				srvrpcinfo, 5);
+ 			printf("\n");
+ 		}

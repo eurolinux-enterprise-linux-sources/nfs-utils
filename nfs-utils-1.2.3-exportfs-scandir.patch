@@ -1,0 +1,18 @@
+diff -up nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig nfs-utils-1.2.3/utils/exportfs/exportfs.c
+--- nfs-utils-1.2.3/utils/exportfs/exportfs.c.orig	2015-03-07 12:23:22.087482338 -0500
++++ nfs-utils-1.2.3/utils/exportfs/exportfs.c	2015-03-18 11:57:01.395641605 -0400
+@@ -618,9 +618,12 @@ export_d_read(const char *dname)
+ 
+ 
+ 	n = scandir(dname, &namelist, NULL, versionsort);
+-	if (n < 0)
++	if (n < 0) {
++		if (errno == ENOENT)
++			/* Silently return */
++			return;
+ 		xlog(L_NOTICE, "scandir %s: %s\n", dname, strerror(errno));
+-	else if (n == 0)
++	} else if (n == 0)
+ 		return;
+ 
+ 	for (i = 0; i < n; i++) {

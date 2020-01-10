@@ -1,0 +1,605 @@
+diff -up nfs-utils-1.2.3/configure.ac.orig nfs-utils-1.2.3/configure.ac
+--- nfs-utils-1.2.3/configure.ac.orig	2014-06-03 12:10:10.325926000 -0400
++++ nfs-utils-1.2.3/configure.ac	2014-06-03 12:12:27.815996000 -0400
+@@ -248,6 +248,8 @@ AC_CHECK_FUNC([getservbyname], ,
+ 
+ AC_CHECK_LIB([crypt], [crypt], [LIBCRYPT="-lcrypt"])
+ 
++AC_CHECK_LIB([dl], [dlclose], [LIBDL="-ldl"])
++
+ if test "$enable_nfsv4" = yes; then
+   dnl check for libevent libraries and headers
+   AC_LIBEVENT
+@@ -292,6 +294,7 @@ AC_SUBST(LIBSOCKET)
+ AC_SUBST(LIBCRYPT)
+ AC_SUBST(LIBBSD)
+ AC_SUBST(LIBBLKID)
++AC_SUBST(LIBDL)
+ 
+ if test "$enable_gss" = yes; then
+   dnl 'gss' requires getnameinfo - at least for gssd_proc.c
+diff -up nfs-utils-1.2.3/support/export/export.c.orig nfs-utils-1.2.3/support/export/export.c
+--- nfs-utils-1.2.3/support/export/export.c.orig	2014-06-03 12:10:09.357898000 -0400
++++ nfs-utils-1.2.3/support/export/export.c	2014-06-03 12:10:24.790360000 -0400
+@@ -31,16 +31,21 @@ static nfs_export *
+ 		export_allowed_internal(const struct addrinfo *ai,
+ 				const char *path);
+ 
++void
++exportent_release(struct exportent *eep)
++{
++	xfree(eep->e_squids);
++	xfree(eep->e_sqgids);
++	free(eep->e_mountpoint);
++	free(eep->e_fslocdata);
++	free(eep->e_uuid);
++	xfree(eep->e_hostname);
++}
++
+ static void
+ export_free(nfs_export *exp)
+ {
+-	xfree(exp->m_export.e_squids);
+-	xfree(exp->m_export.e_sqgids);
+-	free(exp->m_export.e_mountpoint);
+-	free(exp->m_export.e_fslocdata);
+-	free(exp->m_export.e_uuid);
+-
+-	xfree(exp->m_export.e_hostname);
++	exportent_release(&exp->m_export);
+ 	xfree(exp);
+ }
+ 
+diff -up nfs-utils-1.2.3/support/include/exportfs.h.orig nfs-utils-1.2.3/support/include/exportfs.h
+--- nfs-utils-1.2.3/support/include/exportfs.h.orig	2014-06-03 12:10:09.831912000 -0400
++++ nfs-utils-1.2.3/support/include/exportfs.h	2014-06-03 12:10:24.795355000 -0400
+@@ -104,6 +104,7 @@ typedef struct mexport {
+ } nfs_export;
+ 
+ #define HASH_TABLE_SIZE 1021
++#define DEFAULT_TTL	(30 * 60)
+ 
+ typedef struct _exp_hash_entry {
+ 	nfs_export * p_first;
+@@ -140,6 +141,7 @@ nfs_export *			export_find(const struct 
+ nfs_export *			export_allowed(const struct addrinfo *ai,
+ 						const char *path);
+ nfs_export *			export_create(struct exportent *, int canonical);
++void				exportent_release(struct exportent *);
+ void				export_freeall(void);
+ int				export_export(nfs_export *);
+ int				export_unexport(nfs_export *);
+diff -up nfs-utils-1.2.3/support/include/nfslib.h.orig nfs-utils-1.2.3/support/include/nfslib.h
+--- nfs-utils-1.2.3/support/include/nfslib.h.orig	2014-06-03 12:10:09.366902000 -0400
++++ nfs-utils-1.2.3/support/include/nfslib.h	2014-06-03 12:10:24.821356000 -0400
+@@ -89,6 +89,7 @@ struct exportent {
+ 	char *          e_fslocdata;
+ 	char *		e_uuid;
+ 	struct sec_entry e_secinfo[SECFLAVOR_COUNT+1];
++	unsigned int	e_ttl;
+ };
+ 
+ struct rmtabent {
+diff -up nfs-utils-1.2.3/support/nfs/exports.c.orig nfs-utils-1.2.3/support/nfs/exports.c
+--- nfs-utils-1.2.3/support/nfs/exports.c.orig	2014-06-03 12:10:10.358928000 -0400
++++ nfs-utils-1.2.3/support/nfs/exports.c	2014-06-03 12:10:24.827357000 -0400
+@@ -107,6 +107,7 @@ static void init_exportent (struct expor
+ 	ee->e_nsquids = 0;
+ 	ee->e_nsqgids = 0;
+ 	ee->e_uuid = NULL;
++	ee->e_ttl = DEFAULT_TTL;
+ }
+ 
+ struct exportent *
+diff -up nfs-utils-1.2.3/utils/mountd/cache.c.orig nfs-utils-1.2.3/utils/mountd/cache.c
+--- nfs-utils-1.2.3/utils/mountd/cache.c.orig	2014-06-03 12:10:10.075919000 -0400
++++ nfs-utils-1.2.3/utils/mountd/cache.c	2014-06-03 12:11:50.727898000 -0400
+@@ -25,6 +25,8 @@
+ #include <pwd.h>
+ #include <grp.h>
+ #include <mntent.h>
++#include <dlfcn.h>
++#include <link.h>
+ #include "misc.h"
+ #include "nfslib.h"
+ #include "exportfs.h"
+@@ -32,6 +34,7 @@
+ #include "xmalloc.h"
+ #include "fsloc.h"
+ #include "pseudoflavors.h"
++#include "nfs-plugin.h"
+ 
+ #ifdef USE_BLKID
+ #include "blkid/blkid.h"
+@@ -115,7 +118,7 @@ static void auth_unix_ip(FILE *f)
+ 	}
+ 	qword_print(f, "nfsd");
+ 	qword_print(f, ipaddr);
+-	qword_printint(f, time(0)+30*60);
++	qword_printint(f, time(0) + DEFAULT_TTL);
+ 	if (use_ipaddr) {
+ 		memmove(ipaddr + 1, ipaddr, strlen(ipaddr) + 1);
+ 		ipaddr[0] = '$';
+@@ -166,7 +169,7 @@ static void auth_unix_gid(FILE *f)
+ 		}
+ 	}
+ 	qword_printuint(f, uid);
+-	qword_printuint(f, time(0)+30*60);
++	qword_printuint(f, time(0) + DEFAULT_TTL);
+ 	if (rv >= 0) {
+ 		qword_printuint(f, ngroups);
+ 		for (i=0; i<ngroups; i++)
+@@ -662,11 +665,11 @@ static int dump_to_cache(FILE *f, char *
+ {
+ 	qword_print(f, domain);
+ 	qword_print(f, path);
+-	qword_printint(f, time(0)+30*60);
+ 	if (exp) {
+ 		int different_fs = strcmp(path, exp->e_path) != 0;
+ 		int flag_mask = different_fs ? ~NFSEXP_FSID : ~0;
+ 
++		qword_printuint(f, time(0) + exp->e_ttl);
+ 		qword_printint(f, exp->e_flags & flag_mask);
+ 		qword_printint(f, exp->e_anonuid);
+ 		qword_printint(f, exp->e_anongid);
+@@ -685,7 +688,8 @@ static int dump_to_cache(FILE *f, char *
+  			qword_print(f, "uuid");
+  			qword_printhex(f, u, 16);
+  		}
+-	}
++	} else
++		qword_printuint(f, time(0) + DEFAULT_TTL);
+ 	return qword_eol(f);
+ }
+ 
+@@ -757,6 +761,305 @@ lookup_export(char *dom, char *path, str
+ 	return found;
+ }
+ 
++/*
++ * Find the export entry for the parent of "pathname".
++ * Caller must not free returned exportent.
++ */
++static struct exportent *lookup_parent_export(char *dom,
++		const char *pathname, struct addrinfo *ai)
++{
++	char *parent, *slash;
++	nfs_export *result;
++
++	parent = strdup(pathname);
++	if (parent == NULL) {
++		xlog(D_GENERAL, "%s: failed to allocate parent path buffer",
++			__func__);
++		goto out_default;
++	}
++	xlog(D_CALL, "%s: pathname = '%s'", __func__, pathname);
++
++again:
++	/* shorten pathname by one component */
++	slash = strrchr(parent, '/');
++	if (slash == NULL) {
++		xlog(D_GENERAL, "%s: no slash found in pathname",
++			__func__);
++		goto out_default;
++	}
++	*slash = '\0';
++
++	if (strlen(parent) == 0) {
++		result = lookup_export(dom, "/", ai);
++		if (result == NULL) {
++			xlog(L_ERROR, "%s: no root export found.", __func__);
++			goto out_default;
++		}
++		goto out;
++	}
++
++	result = lookup_export(dom, parent, ai);
++	if (result == NULL) {
++		xlog(D_GENERAL, "%s: lookup_export(%s) found nothing",
++			__func__, parent);
++		goto again;
++	}
++
++out:
++	xlog(D_CALL, "%s: found export for %s", __func__, parent);
++	free(parent);
++	return &result->m_export;
++
++out_default:
++	free(parent);
++	return mkexportent("*", "/", "insecure");
++}
++
++/*
++ * Walk through a set of FS locations and build an e_fslocdata string.
++ * Returns true if all went to plan; otherwise, false.
++ */
++static bool locations_to_fslocdata(struct jp_ops *ops,
++		nfs_fsloc_set_t locations, char *fslocdata,
++		size_t remaining, int *ttl)
++{
++	char *server, *last_path, *rootpath, *ptr;
++	_Bool seen = false;
++
++	last_path = NULL;
++	rootpath = NULL;
++	server = NULL;
++	ptr = fslocdata;
++	*ttl = 0;
++
++	for (;;) {
++		enum jp_status status;
++		int len;
++
++		status = ops->jp_get_next_location(locations, &server,
++							&rootpath, ttl);
++		if (status == JP_EMPTY)
++			break;
++		if (status != JP_OK) {
++			xlog(D_GENERAL, "%s: failed to parse location: %s",
++				__func__, ops->jp_error(status));
++			goto out_false;
++		}
++		xlog(D_GENERAL, "%s: Location: %s:%s",
++			__func__, server, rootpath);
++
++		if (last_path && strcmp(rootpath, last_path) == 0) {
++			len = snprintf(ptr, remaining, "+%s", server);
++			if (len < 0) {
++				xlog(D_GENERAL, "%s: snprintf: %m", __func__);
++				goto out_false;
++			}
++			if ((size_t)len >= remaining) {
++				xlog(D_GENERAL, "%s: fslocdata buffer overflow", __func__);
++				goto out_false;
++			}
++			remaining -= (size_t)len;
++			ptr += len;
++		} else {
++			if (last_path == NULL)
++				len = snprintf(ptr, remaining, "%s@%s",
++							rootpath, server);
++			else
++				len = snprintf(ptr, remaining, ":%s@%s",
++							rootpath, server);
++			if (len < 0) {
++				xlog(D_GENERAL, "%s: snprintf: %m", __func__);
++				goto out_false;
++			}
++			if ((size_t)len >= remaining) {
++				xlog(D_GENERAL, "%s: fslocdata buffer overflow",
++					__func__);
++				goto out_false;
++			}
++			remaining -= (size_t)len;
++			ptr += len;
++			last_path = rootpath;
++		}
++
++		seen = true;
++		free(rootpath);
++		free(server);
++	}
++
++	xlog(D_CALL, "%s: fslocdata='%s', ttl=%d",
++		__func__, fslocdata, *ttl);
++	return seen;
++
++out_false:
++	free(rootpath);
++	free(server);
++	return false;
++}
++
++/*
++ * Duplicate the junction's parent's export options and graft in
++ * the fslocdata we constructed from the locations list.
++ */
++static struct exportent *create_junction_exportent(struct exportent *parent,
++		const char *junction, const char *fslocdata, int ttl)
++{
++	static struct exportent *eep;
++
++	eep = (struct exportent *)malloc(sizeof(*eep));
++	if (eep == NULL)
++		goto out_nomem;
++
++	dupexportent(eep, parent);
++	strcpy(eep->e_path, junction);
++	eep->e_hostname = strdup(parent->e_hostname);
++	if (eep->e_hostname == NULL) {
++		free(eep);
++		goto out_nomem;
++	}
++	free(eep->e_uuid);
++	eep->e_uuid = NULL;
++	eep->e_ttl = (unsigned int)ttl;
++
++	free(eep->e_fslocdata);
++	eep->e_fslocdata = strdup(fslocdata);
++	if (eep->e_fslocdata == NULL) {
++		free(eep->e_hostname);
++		free(eep);
++		goto out_nomem;
++	}
++	eep->e_fslocmethod = FSLOC_REFER;
++	return eep;
++
++out_nomem:
++	xlog(L_ERROR, "%s: No memory", __func__);
++	return NULL;
++}
++
++/*
++ * Walk through the set of FS locations and build an exportent.
++ * Returns pointer to an exportent if "junction" refers to a junction.
++ */
++static struct exportent *locations_to_export(struct jp_ops *ops,
++		nfs_fsloc_set_t locations, const char *junction,
++		struct exportent *parent)
++{
++	static char fslocdata[BUFSIZ];
++	int ttl;
++
++	fslocdata[0] = '\0';
++	if (!locations_to_fslocdata(ops, locations,
++					fslocdata, sizeof(fslocdata), &ttl))
++		return NULL;
++	return create_junction_exportent(parent, junction, fslocdata, ttl);
++}
++
++/*
++ * Retrieve locations information in "junction" and dump it to the
++ * kernel.  Returns pointer to an exportent if "junction" refers
++ * to a junction.
++ */
++static struct exportent *invoke_junction_ops(void *handle, char *dom,
++		const char *junction, struct addrinfo *ai)
++{
++	struct exportent *parent, *exp = NULL;
++	nfs_fsloc_set_t locations;
++	enum jp_status status;
++	struct jp_ops *ops;
++	char *error;
++
++	ops = (struct jp_ops *)dlsym(handle, "nfs_junction_ops");
++	error = dlerror();
++	if (error != NULL) {
++		xlog(D_GENERAL, "%s: dlsym(jp_junction_ops): %s",
++			__func__, error);
++		return NULL;
++	}
++	if (ops->jp_api_version != JP_API_VERSION) {
++		xlog(D_GENERAL, "%s: unrecognized junction API version: %u",
++			__func__, ops->jp_api_version);
++		return NULL;
++	}
++
++	status = ops->jp_init(false);
++	if (status != JP_OK) {
++		xlog(D_GENERAL, "%s: failed to resolve %s: %s",
++			__func__, junction, ops->jp_error(status));
++		return NULL;
++	}
++
++	status = ops->jp_get_locations(junction, &locations);
++	switch (status) {
++	case JP_OK:
++		break;
++	case JP_NOTJUNCTION:
++		xlog(D_GENERAL, "%s: %s is not a junction",
++			__func__, junction);
++		goto out;
++	default:
++		xlog(L_WARNING, "Dangling junction %s: %s",
++			junction, ops->jp_error(status));
++		goto out;
++	}
++
++	parent = lookup_parent_export(dom, junction, ai);
++	if (parent == NULL)
++		goto out;
++
++	exp = locations_to_export(ops, locations, junction, parent);
++
++	ops->jp_put_locations(locations);
++
++out:
++	ops->jp_done();
++	return exp;
++}
++
++/*
++ * Load the junction plug-in, then try to resolve "pathname".
++ * Returns pointer to an initialized exportent if "junction"
++ * refers to a junction, or NULL if not.
++ */
++static struct exportent *lookup_junction(char *dom, const char *pathname,
++		struct addrinfo *ai)
++{
++	struct exportent *exp;
++	struct link_map *map;
++	void *handle;
++
++	handle = dlopen("libnfsjunct.so", RTLD_NOW);
++	if (handle == NULL) {
++		xlog(D_GENERAL, "%s: dlopen: %s", __func__, dlerror());
++		return NULL;
++	}
++
++	if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == 0)
++		xlog(D_GENERAL, "%s: loaded plug-in %s",
++			__func__, map->l_name);
++
++	(void)dlerror();	/* Clear any error */
++
++	exp = invoke_junction_ops(handle, dom, pathname, ai);
++
++	/* We could leave it loaded to make junction resolution
++	 * faster next time.  However, if we want to replace the
++	 * library, that would require restarting mountd. */
++	(void)dlclose(handle);
++	return exp;
++}
++
++static void lookup_nonexport(FILE *f, char *dom, char *path,
++		struct addrinfo *ai)
++{
++	struct exportent *eep;
++
++	eep = lookup_junction(dom, path, ai);
++	dump_to_cache(f, dom, path, eep);
++	if (eep == NULL)
++		return;
++	exportent_release(eep);
++	free(eep);
++}
++
+ static void nfsd_export(FILE *f)
+ {
+ 	/* requests are:
+@@ -803,9 +1106,9 @@ static void nfsd_export(FILE *f)
+ 			     " or fsid= required", path);
+ 			dump_to_cache(f, dom, path, NULL);
+ 		}
+-	} else {
+-		dump_to_cache(f, dom, path, NULL);
+-	}
++	} else
++		lookup_nonexport(f, dom, path, ai);
++
+  out:
+ 	xlog(D_CALL, "nfsd_export: found %p path %s", found, path ? path : NULL);
+ 	if (dom) free(dom);
+@@ -884,8 +1187,8 @@ int cache_process_req(fd_set *readfds) 
+ 
+ /*
+  * Give IP->domain and domain+path->options to kernel
+- * % echo nfsd $IP  $[now+30*60] $domain > /proc/net/rpc/auth.unix.ip/channel
+- * % echo $domain $path $[now+30*60] $options $anonuid $anongid $fsid > /proc/net/rpc/nfsd.export/channel
++ * % echo nfsd $IP  $[now+DEFAULT_TTL] $domain > /proc/net/rpc/auth.unix.ip/channel
++ * % echo $domain $path $[now+DEFAULT_TTL] $options $anonuid $anongid $fsid > /proc/net/rpc/nfsd.export/channel
+  */
+ 
+ static int cache_export_ent(char *domain, struct exportent *exp, char *path)
+@@ -965,7 +1268,7 @@ int cache_export(nfs_export *exp, char *
+ 	qword_print(f, "nfsd");
+ 	qword_print(f,
+ 		host_ntop(get_addrlist(exp->m_client, 0), buf, sizeof(buf)));
+-	qword_printint(f, time(0)+30*60);
++	qword_printuint(f, time(0) + exp->m_export.e_ttl);
+ 	qword_print(f, exp->m_client->m_hostname);
+ 	err = qword_eol(f);
+ 	
+diff -up nfs-utils-1.2.3/utils/mountd/Makefile.am.orig nfs-utils-1.2.3/utils/mountd/Makefile.am
+--- nfs-utils-1.2.3/utils/mountd/Makefile.am.orig	2014-06-03 12:10:09.742914000 -0400
++++ nfs-utils-1.2.3/utils/mountd/Makefile.am	2014-06-03 12:10:24.840361000 -0400
+@@ -12,7 +12,7 @@ mountd_SOURCES = mountd.c mount_dispatch
+ mountd_LDADD = ../../support/export/libexport.a \
+ 	       ../../support/nfs/libnfs.a \
+ 	       ../../support/misc/libmisc.a \
+-	       $(LIBBSD) $(LIBWRAP) $(LIBNSL) $(LIBBLKID) $(LIBTIRPC)
++	       $(LIBBSD) $(LIBWRAP) $(LIBNSL) $(LIBBLKID) $(LIBDL) $(LIBTIRPC)
+ mountd_CPPFLAGS = $(AM_CPPFLAGS) $(CPPFLAGS) \
+ 		  -I$(top_builddir)/support/include \
+ 		  -I$(top_srcdir)/support/export
+diff -up nfs-utils-1.2.3/utils/mountd/nfs-plugin.h.orig nfs-utils-1.2.3/utils/mountd/nfs-plugin.h
+--- nfs-utils-1.2.3/utils/mountd/nfs-plugin.h.orig	2014-06-03 12:10:34.282635000 -0400
++++ nfs-utils-1.2.3/utils/mountd/nfs-plugin.h	2014-06-03 12:10:37.930743000 -0400
+@@ -0,0 +1,96 @@
++/*
++ * @file src/include/nfs-plugin.h
++ * @brief Definition of NFS junction plug-in API
++ */
++
++/*
++ * Copyright 2011 Oracle.  All rights reserved.
++ *
++ * This file is part of fedfs-utils.
++ *
++ * fedfs-utils is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2.0 as
++ * published by the Free Software Foundation.
++ *
++ * fedfs-utils is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License version 2.0 for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * version 2.0 along with fedfs-utils.  If not, see:
++ *
++ *	http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
++ */
++
++/*
++ * The purpose of this API is to provide an opaque mechanism for
++ * the NFS mountd daemon to resolve NFS basic and FedFS junctions.
++ * This interface is therefore quite specific to NFS.
++ */
++
++#ifndef FEDFS_NFS_PLUGIN_H
++#define FEDFS_NFS_PLUGIN_H
++
++#include <stdint.h>
++
++__BEGIN_DECLS
++
++/**
++ * Current version of API
++ */
++#define JP_API_VERSION		(1)
++
++/**
++ * A set of NFS FS locations
++ */
++struct nfs_fsloc_set;
++typedef struct nfs_fsloc_set	 *nfs_fsloc_set_t;
++
++/**
++ * Junction operation status codes
++ */
++enum jp_status {
++	JP_OK			=  0,
++	JP_INVAL		= -1,
++	JP_ACCESS		= -2,
++	JP_EXIST		= -3,
++	JP_TYPE_NOT_SUPP	= -4,
++	JP_OP_NOT_SUPP		= -5,
++	JP_ISJUNCTION		= -6,
++	JP_NOTJUNCTION		= -7,
++	JP_NSDBLOCAL		= -8,
++	JP_NSDBREMOTE		= -9,
++	JP_MEMORY		= -10,
++	JP_SYSTEM		= -11,
++	JP_PARSE		= -1000,
++	JP_EMPTY		= -1001,
++};
++
++/**
++ * Vector of methods provided by a junction plug-in
++ */
++struct jp_ops {
++	unsigned int	  jp_api_version;
++
++	enum jp_status	  (*jp_init)(_Bool want_debugging);
++	void		  (*jp_done)(void);
++
++	const char *	  (*jp_error)(enum jp_status status);
++	void		  (*jp_put_locations)(nfs_fsloc_set_t locset);
++	enum jp_status	  (*jp_get_locations)(const char *junct_path,
++					nfs_fsloc_set_t *locset);
++	void		  (*jp_rewind_locations)(nfs_fsloc_set_t locset);
++	enum jp_status	  (*jp_get_next_location)(nfs_fsloc_set_t locset,
++					char **hostname, char **export_path,
++					int *ttl);
++};
++
++/**
++ * Load this symbol to get access to the junction API
++ */
++extern struct jp_ops	  nfs_junction_ops;
++
++__END_DECLS
++
++#endif	/* !FEDFS_NFS_PLUGIN_H */

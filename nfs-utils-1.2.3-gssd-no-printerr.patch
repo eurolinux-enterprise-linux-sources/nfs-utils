@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c.orig nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c
+--- nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c.orig	2015-05-18 11:02:51.258983880 -0400
++++ nfs-utils-1.2.3/utils/gssd/gssd_main_loop.c	2015-05-18 11:03:35.807841023 -0400
+@@ -63,8 +63,6 @@ static volatile int dir_changed = 1;
+ 
+ static void dir_notify_handler(int sig, siginfo_t *si, void *data)
+ {
+-	printerr(2, "dir_notify_handler: sig %d si %p data %p\n", sig, si, data);
+-
+ 	dir_changed = 1;
+ }
+ 

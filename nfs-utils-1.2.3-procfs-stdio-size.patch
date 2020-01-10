@@ -1,0 +1,60 @@
+diff -up nfs-utils-1.2.3/support/include/misc.h.orig nfs-utils-1.2.3/support/include/misc.h
+--- nfs-utils-1.2.3/support/include/misc.h.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/support/include/misc.h	2012-02-29 11:18:45.000000000 -0500
+@@ -17,4 +17,7 @@ int	weakrandomkey(unsigned char *keyout,
+ 
+ extern int is_mountpoint(char *path);
+ 
++/* size of the file pointer buffers for rpc procfs files */
++#define RPC_CHAN_BUF_SIZE 32768
++
+ #endif /* MISC_H */
+diff -up nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c.orig nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c
+--- nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c.orig	2012-02-29 10:44:48.000000000 -0500
++++ nfs-utils-1.2.3/utils/gssd/svcgssd_proc.c	2012-02-29 11:18:45.000000000 -0500
+@@ -56,6 +56,7 @@
+ #include "gss_util.h"
+ #include "err_util.h"
+ #include "context.h"
++#include "misc.h"
+ #include "gss_oids.h"
+ 
+ extern char * mech2file(gss_OID mech);
+@@ -70,6 +71,7 @@ struct svc_cred {
+ 	int	cr_ngroups;
+ 	gid_t	cr_groups[NGROUPS];
+ };
++static char vbuf[RPC_CHAN_BUF_SIZE];
+ 
+ static int
+ do_svc_downcall(gss_buffer_desc *out_handle, struct svc_cred *cred,
+@@ -91,6 +93,7 @@ do_svc_downcall(gss_buffer_desc *out_han
+ 			     SVCGSSD_CONTEXT_CHANNEL, strerror(errno));
+ 		goto out_err;
+ 	}
++	setvbuf(f, vbuf, _IOLBF, RPC_CHAN_BUF_SIZE);
+ 	qword_printhex(f, out_handle->value, out_handle->length);
+ 	/* XXX are types OK for the rest of this? */
+ 	/* For context cache, use the actual context endtime */
+diff -up nfs-utils-1.2.3/utils/mountd/cache.c.orig nfs-utils-1.2.3/utils/mountd/cache.c
+--- nfs-utils-1.2.3/utils/mountd/cache.c.orig	2010-09-28 08:24:16.000000000 -0400
++++ nfs-utils-1.2.3/utils/mountd/cache.c	2012-02-29 11:18:45.000000000 -0500
+@@ -813,6 +813,7 @@ struct {
+ 	char *cache_name;
+ 	void (*cache_handle)(FILE *f);
+ 	FILE *f;
++	char vbuf[RPC_CHAN_BUF_SIZE];
+ } cachelist[] = {
+ 	{ "auth.unix.ip", auth_unix_ip, NULL},
+ 	{ "auth.unix.gid", auth_unix_gid, NULL},
+@@ -836,6 +837,10 @@ void cache_open(void) 
+ 			continue;
+ 		sprintf(path, "/proc/net/rpc/%s/channel", cachelist[i].cache_name);
+ 		cachelist[i].f = fopen(path, "r+");
++		if (cachelist[i].f != NULL) {
++			setvbuf(cachelist[i].f, cachelist[i].vbuf, _IOLBF, 
++				RPC_CHAN_BUF_SIZE);
++		}
+ 	}
+ }
+ 

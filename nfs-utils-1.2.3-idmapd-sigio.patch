@@ -1,0 +1,13 @@
+diff -up nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig nfs-utils-1.2.3/utils/idmapd/idmapd.c
+--- nfs-utils-1.2.3/utils/idmapd/idmapd.c.orig	2012-02-29 09:32:21.000000000 -0500
++++ nfs-utils-1.2.3/utils/idmapd/idmapd.c	2012-02-29 09:40:15.000000000 -0500
+@@ -778,8 +778,8 @@ nfsopen(struct idmap_client *ic)
+ 	} else {
+ 		event_set(&ic->ic_event, ic->ic_fd, EV_READ, nfscb, ic);
+ 		event_add(&ic->ic_event, NULL);
+-		fcntl(ic->ic_dirfd, F_SETSIG, 0);
+ 		fcntl(ic->ic_dirfd, F_NOTIFY, 0);
++		fcntl(ic->ic_dirfd, F_SETSIG, 0);
+ 		if (verbose > 0)
+ 			xlog_warn("Opened %s", ic->ic_path);
+ 	}

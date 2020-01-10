@@ -1,0 +1,30 @@
+From b46c04422f2a4ae76b89bf43a21839b1c5a1fc79 Mon Sep 17 00:00:00 2001
+From: "J. Bruce Fields" <bfields@redhat.com>
+Date: Thu, 3 May 2012 14:56:19 -0400
+Subject: [PATCH] mountd: fix export upcall failure in use_ipaddr case
+
+After 0509d3428f523 "mountd: Replace "struct hostent" with "struct
+addinfo"", the export upcall fails in the use_ipaddr case.
+
+I think we never noticed because a) the use_ipaddr case is rarer than
+the !use_ipaddr case, and b) the nfsd_fh upcall does a preemptive export
+downcall that renders the nfsd export call unnecessary in some cases.
+
+Cc: Chuck Lever <chuck.lever@oracle.com>
+Signed-off-by: J. Bruce Fields <bfields@redhat.com>
+Signed-off-by: Steve Dickson <steved@redhat.com>
+---
+ utils/mountd/cache.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff -up nfs-utils-1.2.3/utils/mountd/cache.c.orig nfs-utils-1.2.3/utils/mountd/cache.c
+--- nfs-utils-1.2.3/utils/mountd/cache.c.orig	2012-07-19 08:54:44.599352000 -0400
++++ nfs-utils-1.2.3/utils/mountd/cache.c	2012-07-19 08:55:24.557535000 -0400
+@@ -786,6 +786,7 @@ static void nfsd_export(FILE *f)
+ 			goto out;
+ 		ai = client_resolve(tmp->ai_addr);
+ 		freeaddrinfo(tmp);
++		if (!ai)
+ 			goto out;
+ 	}
+ 
