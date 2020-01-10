@@ -1,0 +1,37 @@
+diff -up nfs-utils-1.2.3/utils/mount/mount.c.orig nfs-utils-1.2.3/utils/mount/mount.c
+--- nfs-utils-1.2.3/utils/mount/mount.c.orig	2018-08-08 10:21:51.677162665 -0400
++++ nfs-utils-1.2.3/utils/mount/mount.c	2018-08-08 10:22:22.244775944 -0400
+@@ -59,9 +59,6 @@ int string;
+ #define FOREGROUND	(0)
+ #define BACKGROUND	(1)
+ 
+-/* These flags need to be set for user mounts */
+-#define MS_SECURE	(MS_NOEXEC|MS_NOSUID|MS_NODEV)
+-
+ static struct option longopts[] = {
+   { "fake", 0, 0, 'f' },
+   { "help", 0, 0, 'h' },
+@@ -555,8 +552,11 @@ int main(int argc, char *argv[])
+ 		 * to us, so it is non-trivial to test that we have the correct
+ 		 * set of options and we don't want to trust what the user
+ 		 * gave us, so just take whatever is in /etc/fstab.
++		 *
++		 * not-root implies 'user' option which implies
++		 * 'nouser,nodev,nosuid' so we add them here
+ 		 */
+-		mount_opts = strdup(mc->m.mnt_opts);
++		asprintf(&mount_opts, "noexec,nodev,nosuid,%s", mc->m.mnt_opts);
+ 	}
+ 
+ 	mount_point = canonicalize(mount_point);
+@@ -577,9 +577,6 @@ int main(int argc, char *argv[])
+ 
+ 	parse_opts(mount_opts, &flags, &extra_opts);
+ 
+-	if (flags & (MS_USERS|MS_USER))
+-		flags |= MS_SECURE;
+-
+ 	if (uid != 0) {
+ 		if (!(flags & (MS_USERS|MS_USER))) {
+ 			nfs_error(_("%s: permission denied"), progname);
+

@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.2.3
-Release: 78%{?dist}
+Release: 78%{?dist}.1
 Epoch: 1
 
 Source0: http://www.kernel.org/pub/linux/utils/nfs/%{name}-%{version}.tar.bz2
@@ -177,6 +177,10 @@ Patch128: nfs-utils-1.2.3-mount-version.patch
 Patch129: nfs-utils-1.2.3-export-longpath.patch
 Patch130: nfs-utils-1.2.3-exportfs-parsed.patch
 Patch131: nfs-utils-1.2.3-mount-secureflgs.patch
+#
+# RHEL6.10-Z
+#
+Patch132: nfs-utils-1.2.3-mount-noexec.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1010: nfs-utils-1.2.2-statdpath.patch
@@ -500,6 +504,8 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch130 -p1
 # 1443579 - NFS user mounts do not enforce 'noexec' 
 %patch131 -p1
+# 1594707 - nfs-utils-1.2.3-78.el6 enforces noexec even when it should not
+%patch132 -p1
 
 %patch1000 -p1
 %patch1010 -p1
@@ -694,6 +700,9 @@ fi
 %attr(4755,root,root)   /sbin/umount.nfs4
 
 %changelog
+* Wed Aug 22 2018 Steve Dickson <steved@redhat.com> 1.2.3-78_10.1
+- mount.nfs: Don't ignore "users, exec" in fstab (bz 1594707)
+
 * Thu Apr  5 2018 Steve Dickson <steved@redhat.com> 1.2.3-78
 -  mount.nfs: On user mounts set the secure mount flag (bz 1443579)
 
