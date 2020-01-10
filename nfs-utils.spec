@@ -157,6 +157,7 @@ Patch114: nfs-utils-1.2.3-nfs_connect_nb.patch
 Patch115: nfs-utils-1.2.3-nfsidmap-update.patch
 #
 # RHEL6.9
+#
 Patch116: nfs-utils-1.2.3-mount-nonblocking.patch
 Patch117: nfs-utils-1.2.3-nfsidmap-cleanexit.patch
 Patch118: nfs-utils-1.2.3-gssd-uppercase-fix.patch
@@ -170,6 +171,10 @@ Patch125: nfs-utils-1.2.3-exportfs-slashes.patch
 Patch126: nfs-utils-1.2.3-mount-eopnotsupp.patch
 Patch127: nfs-utils-1.2.3-exportfs-umnt-ret-err.patch
 Patch128: nfs-utils-1.2.3-mount-version.patch
+#
+# RHEL6.9-Z
+#
+Patch129: nfs-utils-1.2.3-export-longpath.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1010: nfs-utils-1.2.2-statdpath.patch
@@ -487,6 +492,8 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch127 -p1
 # 1404535 - nfs-utils: /bin/ls --color=auto takes very long on dir...
 %patch128 -p1
+# 1500920 - exportfs segfault due to incorrect sign in export_hash...
+%patch129 -p1
 
 %patch1000 -p1
 %patch1010 -p1
@@ -681,6 +688,9 @@ fi
 %attr(4755,root,root)   /sbin/umount.nfs4
 
 %changelog
+* Mon Oct 16 2017 Steve Dickson <steved@redhat.com> 1.2.3-75_9
+- Exportfs crashes with long path (bz 1500920)
+
 * Wed Dec 14 2016 Steve Dickson <steved@redhat.com> 1.2.3-75
 - Fixed regression with -V flag (bz 1404535)
 

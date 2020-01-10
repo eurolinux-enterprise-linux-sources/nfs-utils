@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.2.3/support/export/export.c.orig nfs-utils-1.2.3/support/export/export.c
+--- nfs-utils-1.2.3/support/export/export.c.orig	2017-10-06 08:15:49.286569509 -0400
++++ nfs-utils-1.2.3/support/export/export.c	2017-10-06 08:16:46.419716134 -0400
+@@ -362,7 +362,7 @@ strtoint(char *str)
+ static int 
+ export_hash(char *str)
+ {
+-	int num = strtoint(str);
++	unsigned int num = strtoint(str);
+ 
+ 	return num % HASH_TABLE_SIZE;
+ }
