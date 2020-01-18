@@ -1,0 +1,21 @@
+commit 3d0e59c63c9957d8cbca26f88bac1784d835e019
+Author: Steve Dickson <steved@redhat.com>
+Date:   Tue Jul 10 14:19:30 2018 -0400
+
+    Fixed typo in nfsmount.conf
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/nfsmount.conf b/utils/mount/nfsmount.conf
+index aeb3023..6bdc225 100644
+--- a/utils/mount/nfsmount.conf
++++ b/utils/mount/nfsmount.conf
+@@ -122,7 +122,7 @@
+ # mountproto=tcp
+ #
+ # Server Mountd Version
+-# mounvers=3
++# mountvers=3
+ #
+ # Server Mountd Host
+ # mounthost=hostname

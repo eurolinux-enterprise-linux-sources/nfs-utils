@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c.orig nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c
+--- nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c.orig	2018-07-10 13:58:43.314210025 -0400
++++ nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c	2018-07-10 14:10:43.732857114 -0400
+@@ -555,7 +555,7 @@ find_cmd(char *cmdname)
+ int
+ main(int argc, char **argv)
+ {
+-	char arg;
++	int arg;
+ 	char *val;
+ 	int rc = 0;
+ 	char *progname, *cmdarg = NULL;

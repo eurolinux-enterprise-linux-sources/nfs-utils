@@ -1,0 +1,25 @@
+diff -up nfs-utils-1.3.0/support/nfs/exports.c.orig nfs-utils-1.3.0/support/nfs/exports.c
+--- nfs-utils-1.3.0/support/nfs/exports.c.orig	2018-07-10 13:49:12.978210878 -0400
++++ nfs-utils-1.3.0/support/nfs/exports.c	2018-07-10 13:50:44.057806104 -0400
+@@ -197,6 +197,7 @@ static const struct secinfo_flag_display
+ 	const char *set;
+ 	const char *unset;
+ } secinfo_flag_displaymap[] = {
++	{ NFSEXP_READONLY, "ro", "rw" },
+ 	{ NFSEXP_INSECURE_PORT, "insecure", "secure" },
+ 	{ NFSEXP_ROOTSQUASH, "root_squash", "no_root_squash" },
+ 	{ NFSEXP_ALLSQUASH, "all_squash", "no_all_squash" },
+diff -up nfs-utils-1.3.0/utils/exportfs/exportfs.c.orig nfs-utils-1.3.0/utils/exportfs/exportfs.c
+--- nfs-utils-1.3.0/utils/exportfs/exportfs.c.orig	2018-07-10 13:49:12.960210562 -0400
++++ nfs-utils-1.3.0/utils/exportfs/exportfs.c	2018-07-10 13:50:44.058806122 -0400
+@@ -756,10 +756,6 @@ dump(int verbose, int export_format)
+ 				continue;
+ 			}
+ 			c = '(';
+-			if (ep->e_flags & NFSEXP_READONLY)
+-				c = dumpopt(c, "ro");
+-			else
+-				c = dumpopt(c, "rw");
+ 			if (ep->e_flags & NFSEXP_ASYNC)
+ 				c = dumpopt(c, "async");
+ 			else

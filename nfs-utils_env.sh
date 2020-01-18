@@ -11,6 +11,15 @@ if test -r $nfs_config; then
     . $nfs_config
 fi
 
+[ -n "$LOCKDARG" ] && /sbin/modprobe lockd $LOCKDARG
+if [ -n "$LOCKD_TCPPORT" -o -n "$LOCKD_UDPPORT" ]; then
+	[ -z "$LOCKDARG" ] && /sbin/modprobe lockd $LOCKDARG
+	[ -n "$LOCKD_TCPPORT" ] && \
+		/sbin/sysctl -w fs.nfs.nlm_tcpport=$LOCKD_TCPPORT >/dev/null 2>&1
+	[ -n "$LOCKD_UDPPORT" ] && \
+		/sbin/sysctl -w fs.nfs.nlm_udpport=$LOCKD_UDPPORT >/dev/null 2>&1
+fi
+
 if [ -n "$MOUNTD_PORT" ]; then
 	RPCMOUNTDOPTS="$RPCMOUNTDOPTS -p $MOUNTD_PORT"
 fi

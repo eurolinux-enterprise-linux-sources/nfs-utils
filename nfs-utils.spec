@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.3.0
-Release: 0.54%{?dist}
+Release: 0.61%{?dist}
 Epoch: 1
 
 # group all 32bit related archs
@@ -139,6 +139,20 @@ Patch105: nfs-utils-1.3.0-nfsdcltrack-invalops.patch
 Patch106: nfs-utils-1.3.0-nfs-man-v2.patch
 Patch107: nfs-utils-1.3.0-nfs-iostat-no-dev.patch
 Patch108: nfs-utils-1.3.0-mount-t-nfs4.patch
+#
+# RHEL7.6
+#
+Patch109: nfs-utils-1.3.0-mountstats-rdma.patch 
+Patch110: nfs-utils-1.3.0-systemd-gssproxy-restart.patch
+Patch111: nfs-utils-1.3.0-nfsd-defautvers.patch
+Patch112: nfs-utils-1.3.0-exportfs-rwro-display.patch
+Patch113: nfs-utils-1.3.0-nfsclient-getopt.patch
+Patch114: nfs-utils-1.3.0-nfsmountconf-typo.patch
+Patch115: nfs-utils-1.3.0-rpcgssd-16bits.patch
+Patch116: nfs-utils-1.3.0-systemd-nfs-man.patch
+Patch117: nfs-utils-1.3.0-mount-clientaddr.patch
+Patch118: nfs-utils-1.3.0-mount-turnoffv4.patch
+Patch119: nfs-utils-1.3.0-nfsconf-disable-v4.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1001: nfs-utils-1.2.1-exp-subtree-warn-off.patch
@@ -412,6 +426,28 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch107 -p1
 # 1547506 - Incorrect NFS version string reported for NFSv4.2 mounts
 %patch108 -p1
+# 1527938 - mountstats: Use correct RDMA terminology
+%patch109 -p1
+# 1527653 - nfs-server.service should use systemctl rather than....
+%patch110 -p1
+# 1436977 - [nfsd] cannot enable minor version 4.1 4.2 by...
+%patch111 -p1
+# 1532688 - Varying ro/rw in NFS export based on security flavor doesn't work 
+%patch112 -p1
+# 1551903 - nfsdcltrack fails to initialize the database in ...
+%patch113 -p1
+# 1592235 - Typo in /etc/nfsmount.conf
+%patch114 -p1
+# 1602836 - Kerberos-enabled NFSv4 doesn't work on armv7hl
+%patch115 -p1
+# 1334510 - nfs v4 mounts with sec=sys are slow to succeed... 
+%patch116 -p1
+# 1592915 - Do sanity checking of clientaddr user input during mount processing
+%patch117 -p1
+# 1596138 - [rpc.nfsd] Setting version failed: errno 22 (Invalid argument)...
+%patch118 -p1
+# 1625032 - [nfsd] fail to disable major NFS version 4 using "vers4=n"...
+%patch119 -p1
 
 %patch1000 -p1
 %patch1001 -p1
@@ -664,6 +700,33 @@ fi
 /sbin/umount.nfs4
 
 %changelog
+* Wed Sep 26 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.61
+- nfs.conf: fail to disable major NFS version 4 using "vers4=n" (bz 1625032)
+
+* Mon Aug 20 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.60
+- Updated: nfsd: Allow the caller to turn off NFSv4.0 (bz 1596138)
+
+* Thu Aug  9 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.59
+- nfsd: Allow the caller to turn off NFSv4.0 (bz 1596138)
+
+* Tue Jul 31 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.58
+- mount.nfs: Add check of clientaddr argument (bz 1592915)
+
+* Sat Jul 21 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.57
+- rpc.gssd: truncates 32-bit UIDs/GIDs to 16 bits architectures (bz 1602836)
+- Added back lockd vars to nfs-utils_env.sh and sysconfig (bz 1413272)
+- Document nfs v4 mounts will use Kerberos we available (bz 1334510)
+
+* Tue Jul 10 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.56
+- exportfs: move ro/rw option back to secinfo_flag_displaymap table (bz 1532688)
+- nfsdcltrack: getopt_long() fails on a non x86_64 archs (bz 1551903)
+- Fixed typo in nfsmount.conf (bz 1592235)
+
+* Mon Jun 11 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.55
+- mountstats: use correct RDMA terminology (bz 1527938)
+- nfs-server: restart gssproxy when the server is restarted. (bz 1527653)
+- nfsd: Set default minor versions (bz 1436977)
+
 * Thu Feb 22 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.54
 - mount: move handling of "-t nfs4" into nfs_nfs_version() (bz 1547506)
 

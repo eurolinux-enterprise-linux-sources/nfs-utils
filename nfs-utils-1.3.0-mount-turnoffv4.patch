@@ -1,0 +1,280 @@
+diff -up nfs-utils-1.3.0/support/include/nfs/nfs.h.orig nfs-utils-1.3.0/support/include/nfs/nfs.h
+--- nfs-utils-1.3.0/support/include/nfs/nfs.h.orig	2018-08-20 14:18:13.975034097 -0400
++++ nfs-utils-1.3.0/support/include/nfs/nfs.h	2018-08-20 14:18:29.624303893 -0400
+@@ -16,8 +16,8 @@
+ #define NFSD_MINVERS 2
+ #define NFSD_MAXVERS 4
+ 
+-#define NFS4_MINMINOR 1
+-#define NFS4_MAXMINOR WORD_BIT
++#define NFS4_MINMINOR 0
++#define NFS4_MAXMINOR (WORD_BIT-1)
+ 
+ struct nfs_fh_len {
+ 	int		fh_size;
+@@ -49,16 +49,19 @@ struct nfs_fh_old {
+ #define NFSCTL_TCPBIT		      (1 << (18 - 1))
+ 
+ #define NFSCTL_VERUNSET(_cltbits, _v) ((_cltbits) &= ~(1 << ((_v) - 1))) 
++#define NFSCTL_MINORUNSET(_cltbits, _v) ((_cltbits) &= ~(1 << (_v)))
+ #define NFSCTL_UDPUNSET(_cltbits)     ((_cltbits) &= ~NFSCTL_UDPBIT) 
+ #define NFSCTL_TCPUNSET(_cltbits)     ((_cltbits) &= ~NFSCTL_TCPBIT) 
+ 
+ #define NFSCTL_VERISSET(_cltbits, _v) ((_cltbits) & (1 << ((_v) - 1))) 
++#define NFSCTL_MINORISSET(_cltbits, _v) ((_cltbits) & (1 << (_v)))
+ #define NFSCTL_UDPISSET(_cltbits)     ((_cltbits) & NFSCTL_UDPBIT) 
+ #define NFSCTL_TCPISSET(_cltbits)     ((_cltbits) & NFSCTL_TCPBIT) 
+ 
+ #define NFSCTL_VERDEFAULT (0xc)       /* versions 3 and 4 */
+ #define NFSCTL_MINDEFAULT (0x7)       /* minor versions 4.1 and 4.2 */
+ #define NFSCTL_VERSET(_cltbits, _v)   ((_cltbits) |= (1 << ((_v) - 1))) 
++#define NFSCTL_MINORSET(_cltbits, _v)   ((_cltbits) |= (1 << (_v)))
+ #define NFSCTL_UDPSET(_cltbits)       ((_cltbits) |= NFSCTL_UDPBIT)
+ #define NFSCTL_TCPSET(_cltbits)       ((_cltbits) |= NFSCTL_TCPBIT)
+ 
+diff -up nfs-utils-1.3.0/utils/nfsd/nfsd.c.orig nfs-utils-1.3.0/utils/nfsd/nfsd.c
+--- nfs-utils-1.3.0/utils/nfsd/nfsd.c.orig	2018-08-20 14:18:13.975034097 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfsd.c	2018-08-20 14:18:58.023793505 -0400
+@@ -66,10 +66,12 @@ main(int argc, char **argv)
+ 	int	socket_up = 0;
+ 	unsigned int minorvers = NFSCTL_MINDEFAULT;
+ 	unsigned int minorversset = NFSCTL_MINDEFAULT;
++	unsigned int minormask = 0;
+ 	unsigned int versbits = NFSCTL_VERDEFAULT;
+ 	unsigned int protobits = NFSCTL_ALLBITS;
+ 	int grace = -1;
+ 	int lease = -1;
++	int force4dot0 = 0;
+ 
+ 	progname = basename(argv[0]);
+ 	haddr = xmalloc(sizeof(char *));
+@@ -103,6 +105,8 @@ main(int argc, char **argv)
+ 		else
+ 			NFSCTL_VERUNSET(versbits, i);
+ 	}
++
++	nfssvc_get_minormask(&minormask);
+ 	/* We assume the kernel will default all minor versions to 'on',
+ 	 * and allow the config file to disable some.
+ 	 */
+@@ -118,12 +122,16 @@ main(int argc, char **argv)
+ 		 * (i.e. don't set the bit in minorversset).
+ 		 */
+ 		if (!conf_get_bool("nfsd", tag, 1)) {
+-			NFSCTL_VERSET(minorversset, i);
+-			NFSCTL_VERUNSET(minorvers, i);
++			NFSCTL_MINORSET(minorversset, i);
++			NFSCTL_MINORUNSET(minorvers, i);
++			if (i == 0)
++				force4dot0 = 1;
+ 		}
+ 		if (conf_get_bool("nfsd", tag, 0)) {
+-			NFSCTL_VERSET(minorversset, i);
+-			NFSCTL_VERSET(minorvers, i);
++			NFSCTL_MINORSET(minorversset, i);
++			NFSCTL_MINORSET(minorvers, i);
++			if (i == 0)
++				force4dot0 = 1;
+ 		}
+ 	}
+ 
+@@ -178,13 +186,19 @@ main(int argc, char **argv)
+ 			case 4:
+ 				if (*p == '.') {
+ 					int i = atoi(p+1);
+-					if (i < NFS4_MINMINOR || i > NFS4_MAXMINOR) {
++					if (i < 0 || i > NFS4_MAXMINOR) {
+ 						fprintf(stderr, "%s: unsupported minor version\n", optarg);
+ 						exit(1);
+ 					}
+-					NFSCTL_VERSET(minorversset, i);
+-					NFSCTL_VERUNSET(minorvers, i);
+-					break;
++					NFSCTL_MINORSET(minorversset, i);
++					NFSCTL_MINORUNSET(minorvers, i);
++					if (i == 0)
++						force4dot0 = 1;
++					if (minorvers != 0)
++						break;
++				} else {
++					minorvers = 0;
++					minorversset = minormask;
+ 				}
+ 			case 3:
+ 			case 2:
+@@ -200,14 +214,16 @@ main(int argc, char **argv)
+ 			case 4:
+ 				if (*p == '.') {
+ 					int i = atoi(p+1);
+-					if (i < NFS4_MINMINOR || i > NFS4_MAXMINOR) {
++					if (i < 0 || i > NFS4_MAXMINOR) {
+ 						fprintf(stderr, "%s: unsupported minor version\n", optarg);
+ 						exit(1);
+ 					}
+-					NFSCTL_VERSET(minorversset, i);
+-					NFSCTL_VERSET(minorvers, i);
+-					break;
+-				}
++					NFSCTL_MINORSET(minorversset, i);
++					NFSCTL_MINORSET(minorvers, i);
++					if (i == 0)
++						force4dot0 = 1;
++				} else
++					minorvers = minorversset = minormask;
+ 			case 3:
+ 			case 2:
+ 				NFSCTL_VERSET(versbits, c);
+@@ -305,7 +321,7 @@ main(int argc, char **argv)
+ 	 * Timeouts must also be set before ports are created else we get
+ 	 * EBUSY.
+ 	 */
+-	nfssvc_setvers(versbits, minorvers, minorversset);
++	nfssvc_setvers(versbits, minorvers, minorversset, force4dot0);
+ 	if (grace > 0)
+ 		nfssvc_set_time("grace", grace);
+ 	if (lease  > 0)
+diff -up nfs-utils-1.3.0/utils/nfsd/nfsd.man.orig nfs-utils-1.3.0/utils/nfsd/nfsd.man
+--- nfs-utils-1.3.0/utils/nfsd/nfsd.man.orig	2018-08-20 14:18:13.934033391 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfsd.man	2018-08-20 14:18:29.625303910 -0400
+@@ -57,7 +57,7 @@ This option can be used to request that
+ .B rpc.nfsd
+ does not offer certain versions of NFS. The current version of
+ .B rpc.nfsd
+-can support major NFS versions 2,3,4 and the minor versions 4.1 and 4.2.
++can support major NFS versions 2,3,4 and the minor versions 4.0, 4.1 and 4.2.
+ .TP
+ .B \-s " or " \-\-syslog
+ By default,
+@@ -82,7 +82,7 @@ This option can be used to request that
+ .B rpc.nfsd
+ offer certain versions of NFS. The current version of
+ .B rpc.nfsd
+-can support major NFS versions 2,3,4 and the minor versions 4.1 and 4.2.
++can support major NFS versions 2,3,4 and the minor versions 4.0, 4.1 and 4.2.
+ .TP
+ .B \-L " or " \-\-lease-time seconds
+ Set the lease-time used for NFSv4.  This corresponds to how often
+diff -up nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig nfs-utils-1.3.0/utils/nfsd/nfssvc.c
+--- nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig	2018-08-20 14:18:13.963033891 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfssvc.c	2018-08-20 14:18:58.023793505 -0400
+@@ -24,6 +24,7 @@
+ #include "nfslib.h"
+ #include "xlog.h"
+ #include "nfssvc.h"
++#include "../mount/version.h"
+ 
+ #ifndef NFSD_FS_DIR
+ #define NFSD_FS_DIR	  "/proc/fs/nfsd"
+@@ -333,36 +334,81 @@ nfssvc_set_time(const char *type, const
+ }
+ 
+ void
+-nfssvc_setvers(unsigned int ctlbits, unsigned int minorvers, unsigned int minorversset)
++nfssvc_get_minormask(unsigned int *mask)
++{
++	int fd;
++	char *ptr = buf;
++	ssize_t size;
++
++	fd = open(NFSD_VERS_FILE, O_RDONLY);
++	if (fd < 0)
++		return;
++
++	size = read(fd, buf, sizeof(buf));
++	if (size < 0) {
++		xlog(L_ERROR, "Getting versions failed: errno %d (%m)", errno);
++		goto out;
++	}
++	ptr[size] = '\0';
++	for (;;) {
++		unsigned vers, minor = 0;
++		char *token = strtok(ptr, " ");
++
++		if (!token)
++			break;
++		ptr = NULL;
++		if (*token != '+' && *token != '-')
++			continue;
++		if (sscanf(++token, "%u.%u", &vers, &minor) > 0 &&
++		    vers == 4 && minor <= NFS4_MAXMINOR)
++			NFSCTL_MINORSET(*mask, minor);
++	}
++out:
++	close(fd);
++	return;
++}
++
++static int
++nfssvc_print_vers(char *ptr, unsigned size, unsigned vers, unsigned minorvers,
++		int isset, int force4dot0)
++{
++	char sign = isset ? '+' : '-';
++	if (minorvers == 0)
++		if (linux_version_code() < MAKE_VERSION(4, 11, 0) || !force4dot0)
++			return snprintf(ptr, size, "%c%u ", sign, vers);
++	return snprintf(ptr, size, "%c%u.%u ", sign, vers, minorvers);
++}
++
++void
++nfssvc_setvers(unsigned int ctlbits, unsigned int minorvers, unsigned int minorversset,
++	       int force4dot0)
+ {
+ 	int fd, n, off;
+-	char *ptr;
+ 
+-	ptr = buf;
+ 	off = 0;
+ 	fd = open(NFSD_VERS_FILE, O_WRONLY);
+ 	if (fd < 0)
+ 		return;
+ 
+-	for (n = NFS4_MINMINOR; n <= NFS4_MAXMINOR; n++) {
+-		if (NFSCTL_VERISSET(minorversset, n)) {
+-			if (NFSCTL_VERISSET(minorvers, n))
+-				off += snprintf(ptr+off, sizeof(buf) - off, "+4.%d ", n);
+-			else
+-				off += snprintf(ptr+off, sizeof(buf) - off, "-4.%d ", n);
+-		}
+-	}
+-	for (n = NFSD_MINVERS; n <= NFSD_MAXVERS; n++) {
+-		if (NFSCTL_VERISSET(ctlbits, n))
+-		    off += snprintf(ptr+off, sizeof(buf) - off, "+%d ", n);
+-		else
+-		    off += snprintf(ptr+off, sizeof(buf) - off, "-%d ", n);
++	for (n = NFSD_MINVERS; n <= ((NFSD_MAXVERS < 3) ? NFSD_MAXVERS : 3); n++)
++		off += nfssvc_print_vers(&buf[off], sizeof(buf) - off,
++				n, 0, NFSCTL_VERISSET(ctlbits, n), 0);
++
++	for (n = 0; n <= NFS4_MAXMINOR; n++) {
++		if (!NFSCTL_MINORISSET(minorversset, n))
++			continue;
++		off += nfssvc_print_vers(&buf[off], sizeof(buf) - off,
++				4, n, NFSCTL_MINORISSET(minorvers, n),
++				(n == 0) ? force4dot0 : 0);
+ 	}
++	if (!off--)
++		goto out;
++	buf[off] = '\0';
+ 	xlog(D_GENERAL, "Writing version string to kernel: %s", buf);
+-	snprintf(ptr+off, sizeof(buf) - off, "\n");
++	snprintf(&buf[off], sizeof(buf) - off, "\n");
+ 	if (write(fd, buf, strlen(buf)) != (ssize_t)strlen(buf))
+ 		xlog(L_ERROR, "Setting version failed: errno %d (%m)", errno);
+-
++out:
+ 	close(fd);
+ 
+ 	return;
+diff -up nfs-utils-1.3.0/utils/nfsd/nfssvc.h.orig nfs-utils-1.3.0/utils/nfsd/nfssvc.h
+--- nfs-utils-1.3.0/utils/nfsd/nfssvc.h.orig	2018-08-20 14:18:13.934033391 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfssvc.h	2018-08-20 14:18:58.023793505 -0400
+@@ -26,5 +26,7 @@ int	nfssvc_set_sockets(const unsigned in
+ 			   const char *host, const char *port);
+ void	nfssvc_set_time(const char *type, const int seconds);
+ int	nfssvc_set_rdmaport(const char *port);
+-void	nfssvc_setvers(unsigned int ctlbits, unsigned int minorvers4, unsigned int minorvers4set);
+-int	nfssvc_threads(unsigned short port, int nrservs);
++void	nfssvc_setvers(unsigned int ctlbits, unsigned int minorvers4,
++		       unsigned int minorvers4set, int force4dot0);
++int		nfssvc_threads(unsigned short port, int nrservs);
++void	nfssvc_get_minormask(unsigned int *mask);
