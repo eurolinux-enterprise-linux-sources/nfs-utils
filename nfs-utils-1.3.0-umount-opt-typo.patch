@@ -1,0 +1,21 @@
+commit a5f1e5797f465d326043eb9daa5f1ad3750d4c9d
+Author: Steve Dickson <steved@redhat.com>
+Date:   Tue Jun 7 16:07:27 2016 -0400
+
+    umount: fixed typo in usage message
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/mount/utils.c b/utils/mount/utils.c
+index 92662ed..865a4a0 100644
+--- a/utils/mount/utils.c
++++ b/utils/mount/utils.c
+@@ -110,7 +110,7 @@ void mount_usage(void)
+ void umount_usage(void)
+ {
+ 	printf(_("usage: %s dir [-fvnrlh]\n"), progname);
+-	printf(_("options:\n\t-f\t\tforce unmount\n"));
++	printf(_("options:\n\t-f\tforce unmount\n"));
+ 	printf(_("\t-v\tverbose\n"));
+ 	printf(_("\t-n\tDo not update /etc/mtab\n"));
+ 	printf(_("\t-r\tremount\n"));

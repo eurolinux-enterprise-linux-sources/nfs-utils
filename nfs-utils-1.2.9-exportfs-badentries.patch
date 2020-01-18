@@ -1,0 +1,94 @@
+diff --git a/support/export/client.c b/support/export/client.c
+index dbf47b9..0f7b4fe 100644
+--- a/support/export/client.c
++++ b/support/export/client.c
+@@ -277,7 +277,7 @@ client_lookup(char *hname, int canonical)
+ 	if (htype == MCL_FQDN && !canonical) {
+ 		ai = host_addrinfo(hname);
+ 		if (!ai) {
+-			xlog(L_ERROR, "Failed to resolve %s", hname);
++			xlog(L_WARNING, "Failed to resolve %s", hname);
+ 			goto out;
+ 		}
+ 		hname = ai->ai_canonname;
+diff --git a/support/export/export.c b/support/export/export.c
+index 6b1d045..ce714d4 100644
+--- a/support/export/export.c
++++ b/support/export/export.c
+@@ -76,15 +76,22 @@ export_read(char *fname)
+ 	struct exportent	*eep;
+ 	nfs_export		*exp;
+ 
++	int volumes = 0;
++
+ 	setexportent(fname, "r");
+ 	while ((eep = getexportent(0,1)) != NULL) {
+ 		exp = export_lookup(eep->e_hostname, eep->e_path, 0);
+-		if (!exp)
+-			export_create(eep, 0);
++		if (!exp) {
++			exp = export_create(eep, 0);
++			if (exp)
++				volumes++;
++		}
+ 		else
+ 			warn_duplicated_exports(exp, eep);
+ 	}
+ 	endexportent();
++	if (volumes == 0)
++		xlog(L_ERROR, "No file systems exported!");
+ }
+ 
+ /**
+diff --git a/support/export/hostname.c b/support/export/hostname.c
+index 5f31aee..cdf9e76 100644
+--- a/support/export/hostname.c
++++ b/support/export/hostname.c
+@@ -137,11 +137,11 @@ host_pton(const char *paddr)
+ 	case EAI_NONAME:
+ 		break;
+ 	case EAI_SYSTEM:
+-		xlog(D_GENERAL, "%s: failed to convert %s: (%d) %m",
++		xlog(L_WARNING, "%s: failed to convert %s: (%d) %m",
+ 				__func__, paddr, errno);
+ 		break;
+ 	default:
+-		xlog(D_GENERAL, "%s: failed to convert %s: %s",
++		xlog(L_WARNING, "%s: failed to convert %s: %s",
+ 				__func__, paddr, gai_strerror(error));
+ 		break;
+ 	}
+@@ -179,11 +179,11 @@ host_addrinfo(const char *hostname)
+ 	case 0:
+ 		return ai;
+ 	case EAI_SYSTEM:
+-		xlog(D_GENERAL, "%s: failed to resolve %s: (%d) %m",
++		xlog(D_PARSE, "%s: failed to resolve %s: (%d) %m",
+ 				__func__, hostname, errno);
+ 		break;
+ 	default:
+-		xlog(D_GENERAL, "%s: failed to resolve %s: %s",
++		xlog(D_PARSE, "%s: failed to resolve %s: %s",
+ 				__func__, hostname, gai_strerror(error));
+ 		break;
+ 	}
+diff --git a/systemd/nfs-server.service b/systemd/nfs-server.service
+index f0e456a..7f60f39 100644
+--- a/systemd/nfs-server.service
++++ b/systemd/nfs-server.service
+@@ -23,13 +23,13 @@ EnvironmentFile=-/run/sysconfig/nfs-utils
+ 
+ Type=oneshot
+ RemainAfterExit=yes
+-ExecStartPre=/usr/sbin/exportfs -r
++ExecStartPre=-/usr/sbin/exportfs -r
+ ExecStart=/usr/sbin/rpc.nfsd $RPCNFSDARGS
+ ExecStop=/usr/sbin/rpc.nfsd 0
+ ExecStopPost=/usr/sbin/exportfs -au
+ ExecStopPost=/usr/sbin/exportfs -f
+ 
+-ExecReload=/usr/sbin/exportfs -r
++ExecReload=-/usr/sbin/exportfs -r
+ 
+ [Install]
+ WantedBy=multi-user.target

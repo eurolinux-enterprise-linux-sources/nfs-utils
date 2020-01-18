@@ -1,0 +1,23 @@
+diff -up nfs-utils-1.3.0/utils/gssd/krb5_util.c.orig nfs-utils-1.3.0/utils/gssd/krb5_util.c
+--- nfs-utils-1.3.0/utils/gssd/krb5_util.c.orig	2016-05-16 08:46:45.554915290 -0400
++++ nfs-utils-1.3.0/utils/gssd/krb5_util.c	2016-05-16 09:13:09.479879099 -0400
+@@ -768,7 +768,7 @@ find_keytab_entry(krb5_context context,
+ 	char **realmnames = NULL;
+ 	char myhostname[NI_MAXHOST], targethostname[NI_MAXHOST];
+ 	char myhostad[NI_MAXHOST+1];
+-	int i, j, retval;
++	int i, j, k, retval;
+ 	char *default_realm = NULL;
+ 	char *realm;
+ 	char *k5err = NULL;
+@@ -913,8 +913,8 @@ find_keytab_entry(krb5_context context,
+ 				 * moving on to the svcname
+ 				 */
+ 				if (strcmp(svcnames[j],"$") == 0 && !tried_upper) {
+-					for (i = 0; myhostad[i] != '$'; ++i) {
+-						myhostad[i] = toupper(myhostad[i]);
++					for (k = 0; myhostad[k] != '$'; ++k) {
++						myhostad[k] = toupper(myhostad[k]);
+ 					}
+ 					j--;
+ 					tried_upper = 1;

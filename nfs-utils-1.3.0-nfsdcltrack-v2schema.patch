@@ -1,0 +1,850 @@
+diff --git a/Makefile.am b/Makefile.am
+index c9e9f87..6f3f3d6 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -9,34 +9,6 @@ MAINTAINERCLEANFILES = Makefile.in
+ EXTRA_DIST = \
+ 	autogen.sh \
+ 	\
+-	debian/changelog \
+-	debian/control \
+-	debian/copyright \
+-	debian/etc.exports \
+-	debian/idmapd.conf \
+-	debian/nfs-common.conffiles \
+-	debian/nfs-common.default \
+-	debian/nfs-common.dirs \
+-	debian/nfs-common.files \
+-	debian/nfs-common.init \
+-	debian/nfs-common.install \
+-	debian/nfs-common.postinst \
+-	debian/nfs-common.postrm \
+-	debian/nfs-common.prerm \
+-	debian/nfs-kernel-server.NEWS \
+-	debian/nfs-kernel-server.conffiles \
+-	debian/nfs-kernel-server.default \
+-	debian/nfs-kernel-server.dirs \
+-	debian/nfs-kernel-server.init \
+-	debian/nfs-kernel-server.postinst \
+-	debian/nfs-kernel-server.postrm \
+-	debian/nfs-kernel-server.prerm \
+-	debian/nhfsstone.dirs \
+-	debian/nhfsstone.files \
+-	debian/nhfsstone.postinst \
+-	debian/nhfsstone.prerm \
+-	debian/rules \
+-	\
+ 	aclocal/bsdsignals.m4 \
+ 	aclocal/nfs-utils.m4 \
+ 	aclocal/kerberos5.m4 \
+diff --git a/support/include/Makefile.am b/support/include/Makefile.am
+index 4b33ee9..5c80c8b 100644
+--- a/support/include/Makefile.am
++++ b/support/include/Makefile.am
+@@ -3,6 +3,7 @@
+ SUBDIRS = nfs rpcsvc sys
+ 
+ noinst_HEADERS = \
++	cld.h \
+ 	exportfs.h \
+ 	ha-callout.h \
+ 	misc.h \
+@@ -10,9 +11,13 @@ noinst_HEADERS = \
+ 	nfs_paths.h \
+ 	nfslib.h \
+ 	nfsrpc.h \
++	nls.h \
+ 	nsm.h \
++	pseudoflavors.h \
+ 	rpcmisc.h \
++	sockaddr.h \
+ 	tcpwrapper.h \
++	v4root.h \
+ 	xio.h \
+ 	xlog.h \
+ 	xmalloc.h \
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index faa8197..1f96264 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -11,3 +11,4 @@ SUBDIRS = nsm_client
+ MAINTAINERCLEANFILES = Makefile.in
+ 
+ TESTS = t0001-statd-basic-mon-unmon.sh
++EXTRA_DIST = test-lib.sh $(TESTS)
+diff --git a/tests/nsm_client/Makefile.am b/tests/nsm_client/Makefile.am
+index 4c15346..a8fc131 100644
+--- a/tests/nsm_client/Makefile.am
++++ b/tests/nsm_client/Makefile.am
+@@ -7,6 +7,7 @@ GENFILES_H	= nlm_sm_inter.h
+ 
+ GENFILES	= $(GENFILES_CLNT) $(GENFILES_SVC) $(GENFILES_XDR) $(GENFILES_H)
+ 
++EXTRA_DIST = nlm_sm_inter.x
+ 
+ check_PROGRAMS	= nsm_client
+ nsm_client_SOURCES = $(GENFILES) nsm_client.c
+diff --git a/utils/gssd/Makefile.am b/utils/gssd/Makefile.am
+index af59791..a4e9c56 100644
+--- a/utils/gssd/Makefile.am
++++ b/utils/gssd/Makefile.am
+@@ -8,7 +8,6 @@ sbin_PREFIXED	= gssd svcgssd
+ sbin_PROGRAMS	= $(sbin_PREFIXED)
+ 
+ EXTRA_DIST = \
+-	gss_destroy_creds \
+ 	$(man8_MANS)
+ 
+ COMMON_SRCS = \
+diff --git a/utils/idmapd/Makefile.am b/utils/idmapd/Makefile.am
+index 58b33ec..c2f8ba1 100644
+--- a/utils/idmapd/Makefile.am
++++ b/utils/idmapd/Makefile.am
+@@ -7,8 +7,7 @@ KPREFIX		= @kprefix@
+ sbin_PROGRAMS	= idmapd
+ 
+ EXTRA_DIST = \
+-	$(man8_MANS) \
+-	idmapd.conf
++	$(man8_MANS)
+ 
+ idmapd_SOURCES = \
+ 	idmapd.c \
+diff --git a/utils/mount/Makefile.am b/utils/mount/Makefile.am
+index 5810936..e24f3bd 100644
+--- a/utils/mount/Makefile.am
++++ b/utils/mount/Makefile.am
+@@ -8,19 +8,21 @@ man8_MANS	= mount.nfs.man umount.nfs.man
+ man5_MANS	= nfs.man
+ 
+ sbin_PROGRAMS	= mount.nfs
+-EXTRA_DIST = nfsmount.x $(man8_MANS) $(man5_MANS)
++EXTRA_DIST = nfsmount.conf $(man8_MANS) $(man5_MANS)
+ mount_common = error.c network.c token.c \
+ 		    parse_opt.c parse_dev.c \
+ 		    nfsmount.c nfs4mount.c stropts.c\
+ 		    mount_constants.h error.h network.h token.h \
+ 		    parse_opt.h parse_dev.h \
+-		    nfs4_mount.h nfs_mount4.h stropts.h version.h \
+-		    mount_config.h utils.c utils.h
++		    nfs4_mount.h stropts.h version.h \
++		    mount_config.h utils.c utils.h \
++		    nfs_mount.h
+ 
+ if MOUNT_CONFIG
+ mount_common += configfile.c
+ man5_MANS += nfsmount.conf.man
+-EXTRA_DIST += nfsmount.conf
++else
++EXTRA_DIST += nfsmount.conf.man
+ endif
+ 
+ mount_nfs_LDADD = ../../support/nfs/libnfs.a \
+diff --git a/utils/mountd/Makefile.am b/utils/mountd/Makefile.am
+index 7db968b..9e1ab5c 100644
+--- a/utils/mountd/Makefile.am
++++ b/utils/mountd/Makefile.am
+@@ -7,6 +7,7 @@ RPCPREFIX	= rpc.
+ KPREFIX		= @kprefix@
+ sbin_PROGRAMS	= mountd
+ 
++noinst_HEADERS = fsloc.h
+ mountd_SOURCES = mountd.c mount_dispatch.c auth.c rmtab.c cache.c \
+ 		 svc_run.c fsloc.c v4root.c mountd.h
+ mountd_LDADD = ../../support/export/libexport.a \
+diff --git a/utils/nfsd/Makefile.am b/utils/nfsd/Makefile.am
+index 1536065..39a6e6f 100644
+--- a/utils/nfsd/Makefile.am
++++ b/utils/nfsd/Makefile.am
+@@ -7,6 +7,7 @@ RPCPREFIX	= rpc.
+ KPREFIX		= @kprefix@
+ sbin_PROGRAMS	= nfsd
+ 
++noinst_HEADERS = nfssvc.h
+ nfsd_SOURCES = nfsd.c nfssvc.c
+ nfsd_LDADD = ../../support/nfs/libnfs.a $(LIBTIRPC)
+ 
+diff --git a/utils/nfsdcltrack/Makefile.am b/utils/nfsdcltrack/Makefile.am
+index a860ffb..d603f92 100644
+--- a/utils/nfsdcltrack/Makefile.am
++++ b/utils/nfsdcltrack/Makefile.am
+@@ -6,6 +6,8 @@ EXTRA_DIST	= $(man8_MANS)
+ AM_CFLAGS	+= -D_LARGEFILE64_SOURCE
+ sbin_PROGRAMS	= nfsdcltrack
+ 
++noinst_HEADERS	= sqlite.h
++
+ nfsdcltrack_SOURCES = nfsdcltrack.c sqlite.c
+ nfsdcltrack_LDADD = ../../support/nfs/libnfs.a $(LIBSQLITE) $(LIBCAP)
+ 
+diff --git a/utils/nfsdcltrack/nfsdcltrack.c b/utils/nfsdcltrack/nfsdcltrack.c
+index 4334340..fcdda7f 100644
+--- a/utils/nfsdcltrack/nfsdcltrack.c
++++ b/utils/nfsdcltrack/nfsdcltrack.c
+@@ -37,6 +37,7 @@
+ #include <libgen.h>
+ #include <sys/inotify.h>
+ #include <dirent.h>
++#include <limits.h>
+ #ifdef HAVE_SYS_CAPABILITY_H
+ #include <sys/prctl.h>
+ #include <sys/capability.h>
+@@ -49,6 +50,8 @@
+ #define CLD_DEFAULT_STORAGEDIR NFS_STATEDIR "/nfsdcltrack"
+ #endif
+ 
++#define NFSD_END_GRACE_FILE "/proc/fs/nfsd/v4_end_grace"
++
+ /* defined by RFC 3530 */
+ #define NFS4_OPAQUE_LIMIT	1024
+ 
+@@ -210,6 +213,64 @@ cltrack_set_caps(void)
+ 	return ret;
+ }
+ 
++/* Inform the kernel that it's OK to lift nfsd's grace period */
++static void
++cltrack_lift_grace_period(void)
++{
++	int fd;
++
++	fd = open(NFSD_END_GRACE_FILE, O_WRONLY);
++	if (fd < 0) {
++		/* Don't warn if file isn't present */
++		if (errno != ENOENT)
++			xlog(L_WARNING, "Unable to open %s: %m",
++				NFSD_END_GRACE_FILE);
++		return;
++	}
++
++	if (write(fd, "Y", 1) < 0)
++		xlog(L_WARNING, "Unable to write to %s: %m",
++				NFSD_END_GRACE_FILE);
++
++	close(fd);
++	return;
++}
++
++/*
++ * Fetch the contents of the NFSDCLTRACK_GRACE_START env var. If it's not set
++ * or there's an error converting it to time_t, then return LONG_MAX.
++ */
++static time_t
++cltrack_get_grace_start(void)
++{
++	time_t grace_start;
++	char *end;
++	char *grace_start_str = getenv("NFSDCLTRACK_GRACE_START");
++
++	if (!grace_start_str)
++		return LONG_MAX;
++
++	errno = 0;
++	grace_start = strtol(grace_start_str, &end, 0);
++	/* Problem converting or value is too large? */
++	if (errno)
++		return LONG_MAX;
++
++	return grace_start;
++}
++
++static bool
++cltrack_reclaims_complete(void)
++{
++	time_t grace_start = cltrack_get_grace_start();
++
++	/* Don't query DB if we didn't get a valid boot time */
++	if (grace_start == LONG_MAX)
++		return false;
++
++	return !sqlite_query_reclaiming(grace_start);
++}
++
+ static int
+ cltrack_init(const char __attribute__((unused)) *unused)
+ {
+@@ -241,7 +302,7 @@ cltrack_init(const char __attribute__((unused)) *unused)
+ 	}
+ 
+ 	/* set up storage db */
+-	ret = sqlite_maindb_init(storagedir);
++	ret = sqlite_prepare_dbh(storagedir);
+ 	if (ret) {
+ 		xlog(L_ERROR, "Failed to init database: %d", ret);
+ 		/*
+@@ -250,15 +311,36 @@ cltrack_init(const char __attribute__((unused)) *unused)
+ 		 * stop upcalling until the problem is resolved.
+ 		 */
+ 		ret = -EACCES;
++	} else {
++		if (cltrack_reclaims_complete())
++			cltrack_lift_grace_period();
+ 	}
++
+ 	return ret;
+ }
+ 
++/*
++ * Fetch the contents of the NFSDCLTRACK_CLIENT_HAS_SESSION env var. If
++ * it's set and the first character is 'Y' then return true. Otherwise
++ * return false.
++ */
++static bool
++cltrack_client_has_session(void)
++{
++	char *has_session = getenv("NFSDCLTRACK_CLIENT_HAS_SESSION");
++
++	if (has_session && *has_session == 'Y')
++		return true;
++
++	return false;
++}
++
+ static int
+ cltrack_create(const char *id)
+ {
+ 	int ret;
+ 	ssize_t len;
++	bool has_session;
+ 
+ 	xlog(D_GENERAL, "%s: create client record.", __func__);
+ 
+@@ -270,7 +352,12 @@ cltrack_create(const char *id)
+ 	if (len < 0)
+ 		return (int)len;
+ 
+-	ret = sqlite_insert_client(blob, len);
++	has_session = cltrack_client_has_session();
++
++	ret = sqlite_insert_client(blob, len, has_session, false);
++
++	if (!ret && has_session && cltrack_reclaims_complete())
++		cltrack_lift_grace_period();
+ 
+ 	return ret ? -EREMOTEIO : ret;
+ }
+@@ -297,7 +384,8 @@ cltrack_remove(const char *id)
+ }
+ 
+ static int
+-cltrack_check_legacy(const unsigned char *blob, const ssize_t len)
++cltrack_check_legacy(const unsigned char *blob, const ssize_t len,
++			bool has_session)
+ {
+ 	int ret;
+ 	struct stat st;
+@@ -323,7 +411,7 @@ cltrack_check_legacy(const unsigned char *blob, const ssize_t len)
+ 	}
+ 
+ 	/* Dir exists, try to insert record into db */
+-	ret = sqlite_insert_client(blob, len);
++	ret = sqlite_insert_client(blob, len, has_session, has_session);
+ 	if (ret) {
+ 		xlog(D_GENERAL, "Failed to insert client: %d", ret);
+ 		return -EREMOTEIO;
+@@ -343,6 +431,7 @@ cltrack_check(const char *id)
+ {
+ 	int ret;
+ 	ssize_t len;
++	bool has_session;
+ 
+ 	xlog(D_GENERAL, "%s: check client record", __func__);
+ 
+@@ -354,9 +443,11 @@ cltrack_check(const char *id)
+ 	if (len < 0)
+ 		return (int)len;
+ 
+-	ret = sqlite_check_client(blob, len);
++	has_session = cltrack_client_has_session();
++
++	ret = sqlite_check_client(blob, len, has_session);
+ 	if (ret)
+-		ret = cltrack_check_legacy(blob, len);
++		ret = cltrack_check_legacy(blob, len, has_session);
+ 
+ 	return ret ? -EPERM : ret;
+ }
+diff --git a/utils/nfsdcltrack/sqlite.c b/utils/nfsdcltrack/sqlite.c
+index bac6789..eb1711a 100644
+--- a/utils/nfsdcltrack/sqlite.c
++++ b/utils/nfsdcltrack/sqlite.c
+@@ -21,17 +21,15 @@
+  * Explanation:
+  *
+  * This file contains the code to manage the sqlite backend database for the
+- * clstated upcall daemon.
++ * nfsdcltrack usermodehelper upcall program.
+  *
+  * The main database is called main.sqlite and contains the following tables:
+  *
+  * parameters: simple key/value pairs for storing database info
+  *
+- * clients: one column containing a BLOB with the as sent by the client
+- * 	    and a timestamp (in epoch seconds) of when the record was
+- * 	    established
+- *
+- * FIXME: should we also record the fsid being accessed?
++ * clients: an "id" column containing a BLOB with the long-form clientid as
++ * 	    sent by the client, a "time" column containing a timestamp (in
++ * 	    epoch seconds) of when the record was last updated.
+  */
+ 
+ #ifdef HAVE_CONFIG_H
+@@ -52,10 +50,10 @@
+ 
+ #include "xlog.h"
+ 
+-#define CLD_SQLITE_SCHEMA_VERSION 1
++#define CLTRACK_SQLITE_LATEST_SCHEMA_VERSION 1
+ 
+ /* in milliseconds */
+-#define CLD_SQLITE_BUSY_TIMEOUT 10000
++#define CLTRACK_SQLITE_BUSY_TIMEOUT 10000
+ 
+ /* private data structures */
+ 
+@@ -90,135 +88,192 @@ mkdir_if_not_exist(const char *dirname)
+ 	return ret;
+ }
+ 
+-/* Open the database and set up the database handle for it */
+-int
+-sqlite_prepare_dbh(const char *topdir)
++static int
++sqlite_query_schema_version(void)
+ {
+ 	int ret;
++	sqlite3_stmt *stmt = NULL;
+ 
+-	/* Do nothing if the database handle is already set up */
+-	if (dbh)
+-		return 0;
+-
+-	ret = snprintf(buf, PATH_MAX - 1, "%s/main.sqlite", topdir);
+-	if (ret < 0)
+-		return ret;
+-
+-	buf[PATH_MAX - 1] = '\0';
+-
+-	ret = sqlite3_open(buf, &dbh);
++	/* prepare select query */
++	ret = sqlite3_prepare_v2(dbh,
++		"SELECT value FROM parameters WHERE key == \"version\";",
++		 -1, &stmt, NULL);
+ 	if (ret != SQLITE_OK) {
+-		xlog(L_ERROR, "Unable to open main database: %d", ret);
+-		dbh = NULL;
+-		return ret;
++		xlog(L_ERROR, "Unable to prepare select statement: %s",
++			sqlite3_errmsg(dbh));
++		ret = 0;
++		goto out;
+ 	}
+ 
+-	ret = sqlite3_busy_timeout(dbh, CLD_SQLITE_BUSY_TIMEOUT);
+-	if (ret != SQLITE_OK) {
+-		xlog(L_ERROR, "Unable to set sqlite busy timeout: %d", ret);
+-		sqlite3_close(dbh);
+-		dbh = NULL;
++	/* query schema version */
++	ret = sqlite3_step(stmt);
++	if (ret != SQLITE_ROW) {
++		xlog(L_ERROR, "Select statement execution failed: %s",
++				sqlite3_errmsg(dbh));
++		ret = 0;
++		goto out;
+ 	}
+ 
++	ret = sqlite3_column_int(stmt, 0);
++out:
++	sqlite3_finalize(stmt);
+ 	return ret;
+ }
+ 
+ /*
+- * Open the "main" database, and attempt to initialize it by creating the
+- * parameters table and inserting the schema version into it. Ignore any errors
+- * from that, and then attempt to select the version out of it again. If the
+- * version appears wrong, then assume that the DB is corrupt or has been
+- * upgraded, and return an error. If all of that works, then attempt to create
+- * the "clients" table.
++ * Start an exclusive transaction and recheck the DB schema version. If it's
++ * still zero (indicating a new database) then set it up. If that all works,
++ * then insert schema version into the parameters table and commit the
++ * transaction. On any error, rollback the transaction.
+  */
+ int
+-sqlite_maindb_init(const char *topdir)
++sqlite_maindb_init_v1(void)
+ {
+ 	int ret;
+ 	char *err = NULL;
+-	sqlite3_stmt *stmt = NULL;
+ 
+-	ret = mkdir_if_not_exist(topdir);
+-	if (ret)
++	/* Start a transaction */
++	ret = sqlite3_exec(dbh, "BEGIN EXCLUSIVE TRANSACTION;", NULL, NULL,
++				&err);
++	if (ret != SQLITE_OK) {
++		xlog(L_ERROR, "Unable to begin transaction: %s", err);
+ 		return ret;
++	}
+ 
+-	ret = sqlite_prepare_dbh(topdir);
+-	if (ret)
+-		return ret;
++	/*
++	 * Check schema version again. This time, under an exclusive
++	 * transaction to guard against racing DB setup attempts
++	 */
++	ret = sqlite_query_schema_version();
++	switch (ret) {
++	case 0:
++		/* Query failed again -- set up DB */
++		break;
++	case CLTRACK_SQLITE_LATEST_SCHEMA_VERSION:
++		/* Someone else raced in and set it up */
++		ret = 0;
++		goto rollback;
++	default:
++		/* Something went wrong -- fail! */
++		ret = -EINVAL;
++		goto rollback;
++	}
+ 
+-	/* Try to create table */
+-	ret = sqlite3_exec(dbh, "CREATE TABLE IF NOT EXISTS parameters "
++	ret = sqlite3_exec(dbh, "CREATE TABLE parameters "
+ 				"(key TEXT PRIMARY KEY, value TEXT);",
+ 				NULL, NULL, &err);
+ 	if (ret != SQLITE_OK) {
+-		xlog(L_ERROR, "Unable to create parameter table: %d", ret);
+-		goto out_err;
++		xlog(L_ERROR, "Unable to create parameter table: %s", err);
++		goto rollback;
+ 	}
+ 
+-	/* insert version into table -- ignore error if it fails */
+-	ret = snprintf(buf, sizeof(buf),
+-		       "INSERT OR IGNORE INTO parameters values (\"version\", "
+-		       "\"%d\");", CLD_SQLITE_SCHEMA_VERSION);
++	/* create the "clients" table */
++	ret = sqlite3_exec(dbh, "CREATE TABLE clients (id BLOB PRIMARY KEY, "
++				"time INTEGER);",
++				NULL, NULL, &err);
++	if (ret != SQLITE_OK) {
++		xlog(L_ERROR, "Unable to create clients table: %s", err);
++		goto rollback;
++	}
++
++
++	/* insert version into parameters table */
++	ret = snprintf(buf, sizeof(buf), "INSERT OR FAIL INTO parameters "
++			"values (\"version\", \"%d\");",
++			CLTRACK_SQLITE_LATEST_SCHEMA_VERSION);
+ 	if (ret < 0) {
+-		goto out_err;
++		xlog(L_ERROR, "sprintf failed!");
++		goto rollback;
+ 	} else if ((size_t)ret >= sizeof(buf)) {
++		xlog(L_ERROR, "sprintf output too long! (%d chars)", ret);
+ 		ret = -EINVAL;
+-		goto out_err;
++		goto rollback;
+ 	}
+ 
+ 	ret = sqlite3_exec(dbh, (const char *)buf, NULL, NULL, &err);
+ 	if (ret != SQLITE_OK) {
+-		xlog(L_ERROR, "Unable to insert into parameter table: %d",
+-				ret);
+-		goto out_err;
++		xlog(L_ERROR, "Unable to insert into parameter table: %s", err);
++		goto rollback;
+ 	}
+ 
+-	ret = sqlite3_prepare_v2(dbh,
+-		"SELECT value FROM parameters WHERE key == \"version\";",
+-		 -1, &stmt, NULL);
++	ret = sqlite3_exec(dbh, "COMMIT TRANSACTION;", NULL, NULL, &err);
+ 	if (ret != SQLITE_OK) {
+-		xlog(L_ERROR, "Unable to prepare select statement: %d", ret);
+-		goto out_err;
++		xlog(L_ERROR, "Unable to commit transaction: %s", err);
++		goto rollback;
+ 	}
++out:
++	sqlite3_free(err);
++	return ret;
+ 
+-	/* check schema version */
+-	ret = sqlite3_step(stmt);
+-	if (ret != SQLITE_ROW) {
+-		xlog(L_ERROR, "Select statement execution failed: %s",
++rollback:
++	/* Attempt to rollback the transaction */
++	sqlite3_exec(dbh, "ROLLBACK TRANSACTION;", NULL, NULL, &err);
++	goto out;
++}
++
++/* Open the database and set up the database handle for it */
++int
++sqlite_prepare_dbh(const char *topdir)
++{
++	int ret;
++
++	/* Do nothing if the database handle is already set up */
++	if (dbh)
++		return 0;
++
++	ret = snprintf(buf, PATH_MAX - 1, "%s/main.sqlite", topdir);
++	if (ret < 0)
++		return ret;
++
++	buf[PATH_MAX - 1] = '\0';
++
++	/* open a new DB handle */
++	ret = sqlite3_open(buf, &dbh);
++	if (ret != SQLITE_OK) {
++		/* try to create the dir */
++		ret = mkdir_if_not_exist(topdir);
++		if (ret)
++			goto out_close;
++
++		/* retry open */
++		ret = sqlite3_open(buf, &dbh);
++		if (ret != SQLITE_OK)
++			goto out_close;
++	}
++
++	/* set busy timeout */
++	ret = sqlite3_busy_timeout(dbh, CLTRACK_SQLITE_BUSY_TIMEOUT);
++	if (ret != SQLITE_OK) {
++		xlog(L_ERROR, "Unable to set sqlite busy timeout: %s",
+ 				sqlite3_errmsg(dbh));
+-		goto out_err;
++		goto out_close;
+ 	}
+ 
+-	/* process SELECT result */
+-	ret = sqlite3_column_int(stmt, 0);
+-	if (ret != CLD_SQLITE_SCHEMA_VERSION) {
++	ret = sqlite_query_schema_version();
++	switch (ret) {
++	case CLTRACK_SQLITE_LATEST_SCHEMA_VERSION:
++		/* DB is already set up. Do nothing */
++		ret = 0;
++		break;
++	case 0:
++		/* Query failed -- try to set up new DB */
++		ret = sqlite_maindb_init_v1();
++		if (ret)
++			goto out_close;
++		break;
++	default:
++		/* Unknown DB version -- downgrade? Fail */
+ 		xlog(L_ERROR, "Unsupported database schema version! "
+ 			"Expected %d, got %d.",
+-			CLD_SQLITE_SCHEMA_VERSION, ret);
++			CLTRACK_SQLITE_LATEST_SCHEMA_VERSION, ret);
+ 		ret = -EINVAL;
+-		goto out_err;
+-	}
+-
+-	/* now create the "clients" table */
+-	ret = sqlite3_exec(dbh, "CREATE TABLE IF NOT EXISTS clients "
+-				"(id BLOB PRIMARY KEY, time INTEGER);",
+-				NULL, NULL, &err);
+-	if (ret != SQLITE_OK) {
+-		xlog(L_ERROR, "Unable to create clients table: %s", err);
+-		goto out_err;
++		goto out_close;
+ 	}
+ 
+-	sqlite3_free(err);
+-	sqlite3_finalize(stmt);
+-	return 0;
+-
+-out_err:
+-	if (err) {
+-		xlog(L_ERROR, "sqlite error: %s", err);
+-		sqlite3_free(err);
+-	}
+-	sqlite3_finalize(stmt);
++	return ret;
++out_close:
+ 	sqlite3_close(dbh);
++	dbh = NULL;
+ 	return ret;
+ }
+ 
+@@ -228,14 +283,20 @@ out_err:
+  * Returns a non-zero sqlite error code, or SQLITE_OK (aka 0)
+  */
+ int
+-sqlite_insert_client(const unsigned char *clname, const size_t namelen)
++sqlite_insert_client(const unsigned char *clname, const size_t namelen,
++			const bool has_session, const bool zerotime)
+ {
+ 	int ret;
+ 	sqlite3_stmt *stmt = NULL;
+ 
+-	ret = sqlite3_prepare_v2(dbh, "INSERT OR REPLACE INTO clients VALUES "
+-				      "(?, strftime('%s', 'now'));", -1,
+-					&stmt, NULL);
++	if (zerotime)
++		ret = sqlite3_prepare_v2(dbh, "INSERT OR REPLACE INTO clients "
++				"VALUES (?, 0, ?);", -1, &stmt, NULL);
++	else
++		ret = sqlite3_prepare_v2(dbh, "INSERT OR REPLACE INTO clients "
++				"VALUES (?, strftime('%s', 'now'), ?);", -1,
++				&stmt, NULL);
++
+ 	if (ret != SQLITE_OK) {
+ 		xlog(L_ERROR, "%s: insert statement prepare failed: %s",
+ 			__func__, sqlite3_errmsg(dbh));
+@@ -250,6 +311,13 @@ sqlite_insert_client(const unsigned char *clname, const size_t namelen)
+ 		goto out_err;
+ 	}
+ 
++	ret = sqlite3_bind_int(stmt, 2, (int)has_session);
++	if (ret != SQLITE_OK) {
++		xlog(L_ERROR, "%s: bind int failed: %s", __func__,
++				sqlite3_errmsg(dbh));
++		goto out_err;
++	}
++
+ 	ret = sqlite3_step(stmt);
+ 	if (ret == SQLITE_DONE)
+ 		ret = SQLITE_OK;
+@@ -305,7 +373,8 @@ out_err:
+  * return an error.
+  */
+ int
+-sqlite_check_client(const unsigned char *clname, const size_t namelen)
++sqlite_check_client(const unsigned char *clname, const size_t namelen,
++			const bool has_session)
+ {
+ 	int ret;
+ 	sqlite3_stmt *stmt = NULL;
+@@ -340,6 +409,12 @@ sqlite_check_client(const unsigned char *clname, const size_t namelen)
+ 		goto out_err;
+ 	}
+ 
++	/* Only update timestamp for v4.0 clients */
++	if (has_session) {
++		ret = SQLITE_OK;
++		goto out_err;
++	}
++
+ 	sqlite3_finalize(stmt);
+ 	stmt = NULL;
+ 	ret = sqlite3_prepare_v2(dbh, "UPDATE OR FAIL clients SET "
+@@ -398,3 +473,43 @@ sqlite_remove_unreclaimed(time_t grace_start)
+ 	sqlite3_free(err);
+ 	return ret;
+ }
++
++/*
++ * Are there any clients that are possibly still reclaiming? Return a positive
++ * integer (usually number of clients) if so. If not, then return 0. On any
++ * error, return non-zero.
++ */
++int
++sqlite_query_reclaiming(const time_t grace_start)
++{
++	int ret;
++	sqlite3_stmt *stmt = NULL;
++
++	ret = sqlite3_prepare_v2(dbh, "SELECT count(*) FROM clients WHERE "
++				      "time < ? OR has_session != 1", -1, &stmt, NULL);
++	if (ret != SQLITE_OK) {
++		xlog(L_ERROR, "%s: unable to prepare select statement: %s",
++				__func__, sqlite3_errmsg(dbh));
++		return ret;
++	}
++
++	ret = sqlite3_bind_int64(stmt, 1, (sqlite3_int64)grace_start);
++	if (ret != SQLITE_OK) {
++		xlog(L_ERROR, "%s: bind int64 failed: %s",
++				__func__, sqlite3_errmsg(dbh));
++		return ret;
++	}
++
++	ret = sqlite3_step(stmt);
++	if (ret != SQLITE_ROW) {
++		xlog(L_ERROR, "%s: unexpected return code from select: %s",
++				__func__, sqlite3_errmsg(dbh));
++		return ret;
++	}
++
++	ret = sqlite3_column_int(stmt, 0);
++	sqlite3_finalize(stmt);
++	xlog(D_GENERAL, "%s: there are %d clients that have not completed "
++			"reclaim", __func__, ret);
++	return ret;
++}
+diff --git a/utils/nfsdcltrack/sqlite.h b/utils/nfsdcltrack/sqlite.h
+index ebf04c3..06e7c04 100644
+--- a/utils/nfsdcltrack/sqlite.h
++++ b/utils/nfsdcltrack/sqlite.h
+@@ -21,10 +21,12 @@
+ #define _SQLITE_H_
+ 
+ int sqlite_prepare_dbh(const char *topdir);
+-int sqlite_maindb_init(const char *topdir);
+-int sqlite_insert_client(const unsigned char *clname, const size_t namelen);
++int sqlite_insert_client(const unsigned char *clname, const size_t namelen,
++				const bool has_session, const bool zerotime);
+ int sqlite_remove_client(const unsigned char *clname, const size_t namelen);
+-int sqlite_check_client(const unsigned char *clname, const size_t namelen);
++int sqlite_check_client(const unsigned char *clname, const size_t namelen,
++				const bool has_session);
+ int sqlite_remove_unreclaimed(const time_t grace_start);
++int sqlite_query_reclaiming(const time_t grace_start);
+ 
+ #endif /* _SQLITE_H */
+diff --git a/utils/nfsidmap/Makefile.am b/utils/nfsidmap/Makefile.am
+index 737a219..91cedfd 100644
+--- a/utils/nfsidmap/Makefile.am
++++ b/utils/nfsidmap/Makefile.am
+@@ -7,4 +7,4 @@ nfsidmap_SOURCES = nfsidmap.c
+ nfsidmap_LDADD = $(LIBNFSIDMAP) -lkeyutils ../../support/nfs/libnfs.a
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+-EXTRA_DIST = id_resolver.conf
++EXTRA_DIST = id_resolver.conf $(man8_MANS)
+diff --git a/utils/osd_login/Makefile.am b/utils/osd_login/Makefile.am
+index 20c2d8c..ded1fd3 100644
+--- a/utils/osd_login/Makefile.am
++++ b/utils/osd_login/Makefile.am
+@@ -4,6 +4,6 @@
+ # overridden at config time.
+ sbindir = /sbin
+ 
+-sbin_SCRIPTS = osd_login
++dist_sbin_SCRIPTS = osd_login
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+diff --git a/utils/statd/Makefile.am b/utils/statd/Makefile.am
+index dc2bfc4..152b680 100644
+--- a/utils/statd/Makefile.am
++++ b/utils/statd/Makefile.am
+@@ -8,7 +8,7 @@ sbin_PROGRAMS	= statd sm-notify
+ dist_sbin_SCRIPTS	= start-statd
+ statd_SOURCES = callback.c notlist.c misc.c monitor.c hostname.c \
+ 	        simu.c stat.c statd.c svc_run.c rmtcall.c \
+-	        notlist.h statd.h system.h version.h
++	        notlist.h statd.h system.h
+ sm_notify_SOURCES = sm-notify.c
+ 
+ BUILT_SOURCES = $(GENFILES)
+@@ -20,7 +20,7 @@ sm_notify_LDADD = ../../support/nsm/libnsm.a \
+ 		  ../../support/nfs/libnfs.a \
+ 		  $(LIBNSL) $(LIBCAP) $(LIBTIRPC)
+ 
+-EXTRA_DIST = sim_sm_inter.x $(man8_MANS) COPYRIGHT simulate.c
++EXTRA_DIST = sim_sm_inter.x $(man8_MANS) simulate.c
+ 
+ if CONFIG_RPCGEN
+ RPCGEN	= $(top_builddir)/tools/rpcgen/rpcgen

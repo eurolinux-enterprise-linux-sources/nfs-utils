@@ -1,0 +1,82 @@
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.c.orig nfs-utils-1.3.0/utils/gssd/gssd.c
+--- nfs-utils-1.3.0/utils/gssd/gssd.c.orig	2014-09-17 13:00:22.702932025 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.c	2014-09-17 13:00:26.575004049 -0400
+@@ -64,6 +64,7 @@ char *ccachesearch[GSSD_MAX_CCACHE_SEARC
+ int  use_memcache = 0;
+ int  root_uses_machine_creds = 1;
+ unsigned int  context_timeout = 0;
++unsigned int  rpc_timeout = 5;
+ char *preferred_realm = NULL;
+ int pipefds[2] = { -1, -1 };
+ 
+@@ -105,7 +106,7 @@ main(int argc, char *argv[])
+ 	char *progname;
+ 
+ 	memset(ccachesearch, 0, sizeof(ccachesearch));
+-	while ((opt = getopt(argc, argv, "DfvrlmnMp:k:d:t:R:")) != -1) {
++	while ((opt = getopt(argc, argv, "DfvrlmnMp:k:d:t:T:R:")) != -1) {
+ 		switch (opt) {
+ 			case 'f':
+ 				fg = 1;
+@@ -143,6 +144,9 @@ main(int argc, char *argv[])
+ 			case 't':
+ 				context_timeout = atoi(optarg);
+ 				break;
++			case 'T':
++				rpc_timeout = atoi(optarg);
++				break;
+ 			case 'R':
+ 				preferred_realm = strdup(optarg);
+ 				break;
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.h.orig nfs-utils-1.3.0/utils/gssd/gssd.h
+--- nfs-utils-1.3.0/utils/gssd/gssd.h.orig	2014-09-17 13:00:22.702932025 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.h	2014-09-17 13:00:26.575004049 -0400
+@@ -66,6 +66,7 @@ extern char			*ccachesearch[];
+ extern int			use_memcache;
+ extern int			root_uses_machine_creds;
+ extern unsigned int 		context_timeout;
++extern unsigned int rpc_timeout;
+ extern char			*preferred_realm;
+ extern int			pipefds[2];
+ 
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.man.orig nfs-utils-1.3.0/utils/gssd/gssd.man
+--- nfs-utils-1.3.0/utils/gssd/gssd.man.orig	2014-09-17 13:00:22.702932025 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.man	2014-09-17 13:00:26.575004049 -0400
+@@ -289,6 +289,14 @@ new kernel contexts to be negotiated aft
+ seconds, which allows changing Kerberos tickets and identities frequently.
+ The default is no explicit timeout, which means the kernel context will live
+ the lifetime of the Kerberos service ticket used in its creation.
++.TP
++.B -T timeout
++Timeout, in seconds, to create an RPC connection with a server while
++establishing an authenticated gss context for a user.
++The default timeout is set to 5 seconds.
++If you get messages like "WARNING: can't create tcp rpc_clnt to server
++%servername% for user with uid %uid%: RPC: Remote system error -
++Connection timed out", you should consider an increase of this timeout.
+ .SH SEE ALSO
+ .BR rpc.svcgssd (8),
+ .BR kerberos (1),
+diff -up nfs-utils-1.3.0/utils/gssd/gssd_proc.c.orig nfs-utils-1.3.0/utils/gssd/gssd_proc.c
+--- nfs-utils-1.3.0/utils/gssd/gssd_proc.c.orig	2014-09-17 13:00:22.702932025 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd_proc.c	2014-09-17 13:00:26.575004049 -0400
+@@ -842,7 +842,7 @@ create_auth_rpc_client(struct clnt_info
+ 	OM_uint32		min_stat;
+ 	char			rpc_errmsg[1024];
+ 	int			protocol;
+-	struct timeval		timeout = {5, 0};
++	struct timeval	timeout;
+ 	struct sockaddr		*addr = (struct sockaddr *) &clp->addr;
+ 	socklen_t		salen;
+ 
+@@ -910,6 +910,10 @@ create_auth_rpc_client(struct clnt_info
+ 	if (!populate_port(addr, salen, clp->prog, clp->vers, protocol))
+ 		goto out_fail;
+ 
++	/* set the timeout according to the requested valued */
++	timeout.tv_sec = (long) rpc_timeout;
++	timeout.tv_usec = (long) 0;
++
+ 	rpc_clnt = nfs_get_rpcclient(addr, salen, protocol, clp->prog,
+ 				     clp->vers, &timeout);
+ 	if (!rpc_clnt) {

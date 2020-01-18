@@ -1,0 +1,37 @@
+commit c4940fad2a73481cad67732746a4e2bb74e8d32e
+Author: NeilBrown <neilb@suse.com>
+Date:   Wed Mar 16 12:18:40 2016 -0400
+
+    systemd: ensure nfs-config service is re-run as needed.
+    
+    The nfs-config service translates distro-specific startup
+    configuration into "environment" variable read and used
+    by systemd unit files.
+    
+    Currently it is only run once, so subsequent changes to the
+    distro-specific files do not take effect when an nfs service is
+    restarted.
+    
+    If we change "RemainAfterExit=yes" to "RemainAfterExit=no" then the
+    service will be restarted before any dependant service is started, so
+    the environment file will always be up to date.
+    
+    Reported-and-tested-by: Benjamin Coddington <bcodding@redhat.com>
+    Signed-off-by: NeilBrown <neilb@suse.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/systemd/nfs-config.service b/systemd/nfs-config.service
+index 7f65305..4b206b5 100644
+--- a/systemd/nfs-config.service
++++ b/systemd/nfs-config.service
+@@ -5,5 +5,9 @@ DefaultDependencies=no
+ 
+ [Service]
+ Type=oneshot
+-RemainAfterExit=yes
++# This service needs to run any time any nfs service
++# is started, so changes to local config files get
++# incorporated.  Having "RemainAfterExit=no" (the default)
++# ensures this happens.
++RemainAfterExit=no
+ ExecStart=/usr/lib/systemd/scripts/nfs-utils_env.sh

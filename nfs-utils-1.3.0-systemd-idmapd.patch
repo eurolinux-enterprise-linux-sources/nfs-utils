@@ -1,0 +1,57 @@
+diff -up nfs-utils-1.3.0/systemd/nfs-idmapd.service.orig nfs-utils-1.3.0/systemd/nfs-idmapd.service
+--- nfs-utils-1.3.0/systemd/nfs-idmapd.service.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/systemd/nfs-idmapd.service	2015-01-15 08:04:55.291478000 -0500
+@@ -1,7 +1,7 @@
+ [Unit]
+ Description=NFSv4 ID-name mapping service
+ 
+-PartOf=nfs-utils.service
++BindsTo=nfs-server.service
+ 
+ Wants=nfs-config.service
+ After=nfs-config.service
+diff -up nfs-utils-1.3.0/systemd/nfs-mountd.service.orig nfs-utils-1.3.0/systemd/nfs-mountd.service
+--- nfs-utils-1.3.0/systemd/nfs-mountd.service.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/systemd/nfs-mountd.service	2015-01-15 08:04:55.300477000 -0500
+@@ -3,8 +3,7 @@ Description=NFS Mount Daemon
+ Requires=proc-fs-nfsd.mount
+ After=proc-fs-nfsd.mount
+ After=network.target
+-PartOf=nfs-server.service
+-PartOf=nfs-utils.service
++BindsTo=nfs-server.service
+ 
+ Wants=nfs-config.service
+ After=nfs-config.service
+diff -up nfs-utils-1.3.0/systemd/rpc-statd-notify.service.orig nfs-utils-1.3.0/systemd/rpc-statd-notify.service
+--- nfs-utils-1.3.0/systemd/rpc-statd-notify.service.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/systemd/rpc-statd-notify.service	2015-01-15 08:06:17.251900000 -0500
+@@ -14,6 +14,5 @@ After=nfs-config.service
+ 
+ [Service]
+ EnvironmentFile=-/run/sysconfig/nfs-utils
+-Type=oneshot
+-RemainAfterExit=yes
+-ExecStart=-/usr/sbin/sm-notify -d $SMNOTIFYARGS
++Type=forking
++ExecStart=-/usr/sbin/sm-notify $SMNOTIFYARGS
+diff -up nfs-utils-1.3.0/utils/statd/start-statd.orig nfs-utils-1.3.0/utils/statd/start-statd
+--- nfs-utils-1.3.0/utils/statd/start-statd.orig	2015-01-15 08:03:24.456789000 -0500
++++ nfs-utils-1.3.0/utils/statd/start-statd	2015-01-15 08:05:34.612638000 -0500
+@@ -5,9 +5,12 @@
+ # It should run statd with whatever flags are apropriate for this
+ # site.
+ PATH="/sbin:/usr/sbin:/bin:/usr/bin"
+-if systemctl start rpc-statd.service
+-then :
+-else
+-    exec rpc.statd --no-notify
++
++# First try systemd if it's installed.
++if [ -d /run/systemd/system ]; then
++	# Quit only if the call worked.
++	systemctl start rpc-statd.service && exit
+ fi
+ 
++# Fall back to launching it ourselves.
++exec rpc.statd --no-notify

@@ -1,0 +1,354 @@
+diff --git a/Makefile.am b/Makefile.am
+index ae7cd16..c9e9f87 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -2,7 +2,7 @@
+ 
+ AUTOMAKE_OPTIONS = foreign
+ 
+-SUBDIRS = tools support utils linux-nfs tests
++SUBDIRS = tools support utils linux-nfs tests systemd
+ 
+ MAINTAINERCLEANFILES = Makefile.in
+ 
+diff --git a/configure.ac b/configure.ac
+index 7b93de6..4ee4db5 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -54,6 +54,16 @@ AC_ARG_WITH(start-statd,
+ 	)
+ 	AC_SUBST(startstatd)
+ 	AC_DEFINE_UNQUOTED(START_STATD, "$startstatd", [Define this to a script which can start statd on mount])
++unitdir=/usr/lib/systemd/system
++AC_ARG_WITH(systemd,
++	[AC_HELP_STRING([--with-systemd@<:@=unit-dir-path@:>@],
++			[install systemd unit files @<:@Default: no, and path defaults to /usr/lib/systemd/system if not given@:>@])],
++	test "$withval" = "no" && use_systemd=0 || unitdir=$withval use_systemd=1
++	use_systemd=0
++	)
++	AM_CONDITIONAL(INSTALL_SYSTEMD, [test "$use_systemd" = 1])
++	AC_SUBST(unitdir)
++
+ AC_ARG_ENABLE(nfsv4,
+ 	[AC_HELP_STRING([--enable-nfsv4],
+                         [enable support for NFSv4 @<:@default=yes@:>@])],
+@@ -506,6 +516,7 @@ AC_CONFIG_FILES([
+ 	utils/showmount/Makefile
+ 	utils/statd/Makefile
+ 	utils/osd_login/Makefile
++	systemd/Makefile
+ 	tests/Makefile
+ 	tests/nsm_client/Makefile])
+ AC_OUTPUT
+diff --git a/support/include/nfs/export.h b/support/include/nfs/export.h
+index 2f59e6a..1194255 100644
+--- a/support/include/nfs/export.h
++++ b/support/include/nfs/export.h
+@@ -26,6 +26,7 @@
+ #define	NFSEXP_CROSSMOUNT	0x4000
+ #define NFSEXP_NOACL		0x8000 /* reserved for possible ACL related use */
+ #define NFSEXP_V4ROOT		0x10000
++#define NFSEXP_PNFS            0x20000
+ /*
+  * All flags supported by the kernel before addition of the
+  * export_features interface:
+diff --git a/support/nfs/exports.c b/support/nfs/exports.c
+index 5451ed7..9399a12 100644
+--- a/support/nfs/exports.c
++++ b/support/nfs/exports.c
+@@ -275,6 +275,7 @@ putexportent(struct exportent *ep)
+ 		"no_" : "");
+ 	if (ep->e_flags & NFSEXP_NOREADDIRPLUS)
+ 		fprintf(fp, "nordirplus,");
++	fprintf(fp, "%spnfs,", (ep->e_flags & NFSEXP_PNFS)? "" : "no_");
+ 	if (ep->e_flags & NFSEXP_FSID) {
+ 		fprintf(fp, "fsid=%d,", ep->e_fsid);
+ 	}
+@@ -581,6 +582,10 @@ parseopts(char *cp, struct exportent *ep, int warn, int *had_subtree_opt_ptr)
+ 			clearflags(NFSEXP_NOACL, active, ep);
+ 		else if (strcmp(opt, "no_acl") == 0)
+ 			setflags(NFSEXP_NOACL, active, ep);
++		else if (!strcmp(opt, "pnfs"))
++			setflags(NFSEXP_PNFS, active, ep);
++		else if (!strcmp(opt, "no_pnfs"))
++			clearflags(NFSEXP_PNFS, active, ep);
+ 		else if (strncmp(opt, "anonuid=", 8) == 0) {
+ 			char *oe;
+ 			ep->e_anonuid = strtol(opt+8, &oe, 10);
+diff --git a/systemd/Makefile.am b/systemd/Makefile.am
+new file mode 100644
+index 0000000..fbcabb1
+--- /dev/null
++++ b/systemd/Makefile.am
+@@ -0,0 +1,31 @@
++## Process this file with automake to produce Makefile.in
++
++MAINTAINERCLEANFILES = Makefile.in
++
++unit_files =  \
++    nfs-client.target \
++    \
++    auth-rpcgss-module.service \
++    nfs-blkmap.service \
++    nfs-config.service \
++    nfs-idmapd.service \
++    nfs-mountd.service \
++    nfs-server.service \
++    nfs-utils.service \
++    rpc-gssd.service \
++    rpc-statd-notify.service \
++    rpc-statd.service \
++    rpc-svcgssd.service \
++    \
++    proc-fs-nfsd.mount \
++    var-lib-nfs-rpc_pipefs.mount
++
++EXTRA_DIST = $(unit_files)
++
++unit_dir = /usr/lib/systemd/system
++
++if INSTALL_SYSTEMD
++install-data-hook: $(unit_files)
++	mkdir -p $(DESTDIR)/$(unitdir)
++	cp $(unit_files) $(DESTDIR)/$(unitdir)
++endif
+diff --git a/systemd/README b/systemd/README
+index a2a5f06..bbd7790 100644
+--- a/systemd/README
++++ b/systemd/README
+@@ -24,7 +24,7 @@ by a suitable 'preset' setting:
+     is started by /usr/sbin/start-statd which mount.nfs will run
+     if statd is needed.
+ 
+- nfs-blkmap.target
++ nfs-blkmap.service
+     If enabled, then blkmapd will be run when nfs-client.target is
+     started.
+ 
+diff --git a/systemd/nfs-blkmap.service b/systemd/nfs-blkmap.service
+index f470e3d..ddbf4e9 100644
+--- a/systemd/nfs-blkmap.service
++++ b/systemd/nfs-blkmap.service
+@@ -5,12 +5,13 @@ Conflicts=umount.target
+ After=var-lib-nfs-rpc_pipefs.mount
+ Requires=var-lib-nfs-rpc_pipefs.mount
+ 
+-Requisite=nfs-blkmap.target
+-After=nfs-blkmap.target
+-
+ PartOf=nfs-utils.service
+ 
+ [Service]
+ Type=forking
+ PIDFile=/var/run/blkmapd.pid
++EnvironmentFile=-/run/sysconfig/nfs-utils
+ ExecStart=/usr/sbin/blkmapd $BLKMAPDARGS
++
++[Install]
++WantedBy=nfs-client.target
+diff --git a/systemd/nfs-blkmap.target b/systemd/nfs-blkmap.target
+deleted file mode 100644
+index fbcc111..0000000
+--- a/systemd/nfs-blkmap.target
++++ /dev/null
+@@ -1,8 +0,0 @@
+-[Unit]
+-Description= PNFS blkmaping enablement.
+-# If this target is enabled, then blkmapd will be started
+-# as required.  If it is not enabled it won't.
+-
+-[Install]
+-WantedBy=remote-fs.target
+-WantedBy=multi-user.target
+\ No newline at end of file
+diff --git a/systemd/nfs-client.target b/systemd/nfs-client.target
+index 9b792a3..8a8300a 100644
+--- a/systemd/nfs-client.target
++++ b/systemd/nfs-client.target
+@@ -5,8 +5,7 @@ Wants=remote-fs-pre.target
+ 
+ # Note: we don't "Wants=rpc-statd.service" as "mount.nfs" will arrange to
+ # start that on demand if needed.
+-Wants=nfs-blkmap.service rpc-statd-notify.service
+-After=nfs-blkmap.service
++Wants=rpc-statd-notify.service
+ 
+ # GSS services dependencies and ordering
+ Wants=auth-rpcgss-module.service
+diff --git a/utils/blkmapd/device-discovery.c b/utils/blkmapd/device-discovery.c
+index df4627e..b52afe2 100644
+--- a/utils/blkmapd/device-discovery.c
++++ b/utils/blkmapd/device-discovery.c
+@@ -77,16 +77,6 @@ struct bl_disk_path *bl_get_path(const char *filepath,
+ 	return tmp;
+ }
+ 
+-/* Check whether valid_path is a substring(partition) of path */
+-int bl_is_partition(struct bl_disk_path *valid_path, struct bl_disk_path *path)
+-{
+-	if (!strncmp(valid_path->full_path, path->full_path,
+-		     strlen(valid_path->full_path)))
+-		return 1;
+-
+-	return 0;
+-}
+-
+ /*
+  * For multipath devices, devices state could be PASSIVE/ACTIVE/PSEUDO,
+  * where PSEUDO > ACTIVE > PASSIVE. Device with highest state is used to
+@@ -95,19 +85,13 @@ int bl_is_partition(struct bl_disk_path *valid_path, struct bl_disk_path *path)
+  * If device-mapper multipath support is a must, pseudo devices should
+  * exist for each multipath device. If not, active device path will be
+  * chosen for device creation.
+- * Treat partition as invalid path.
+  */
+-int bl_update_path(struct bl_disk_path *path, enum bl_path_state_e state,
+-		   struct bl_disk *disk)
++int bl_update_path(enum bl_path_state_e state, struct bl_disk *disk)
+ {
+ 	struct bl_disk_path *valid_path = disk->valid_path;
+ 
+-	if (valid_path) {
+-		if (valid_path->state >= state) {
+-			if (bl_is_partition(valid_path, path))
+-				return 0;
+-		}
+-	}
++	if (valid_path && valid_path->state >= state)
++		return 0;
+ 	return 1;
+ }
+ 
+@@ -164,15 +148,16 @@ void bl_add_disk(char *filepath)
+ 
+ 	dev = sb.st_rdev;
+ 	serial = bldev_read_serial(fd, filepath);
+-	if (dm_is_dm_major(major(dev)))
++	if (!serial) {
++		BL_LOG_ERR("%s: no serial found for %s\n",
++				 __func__, filepath);
++		ap_state = BL_PATH_STATE_PASSIVE;
++	} else if (dm_is_dm_major(major(dev)))
+ 		ap_state = BL_PATH_STATE_PSEUDO;
+ 	else
+ 		ap_state = bldev_read_ap_state(fd);
+ 	close(fd);
+ 
+-	if (ap_state != BL_PATH_STATE_ACTIVE)
+-		return;
+-
+ 	for (disk = visible_disk_list; disk != NULL; disk = disk->next) {
+ 		/* Already scanned or a partition?
+ 		 * XXX: if released each time, maybe not need to compare
+@@ -216,7 +201,7 @@ void bl_add_disk(char *filepath)
+ 		path->next = disk->paths;
+ 		disk->paths = path;
+ 		/* check whether we need to update disk info */
+-		if (bl_update_path(path, path->state, disk)) {
++		if (bl_update_path(path->state, disk)) {
+ 			disk->dev = dev;
+ 			disk->size = size;
+ 			disk->valid_path = path;
+diff --git a/utils/blkmapd/device-inq.c b/utils/blkmapd/device-inq.c
+index eabc70c..c5bf71f 100644
+--- a/utils/blkmapd/device-inq.c
++++ b/utils/blkmapd/device-inq.c
+@@ -179,6 +179,7 @@ struct bl_serial *bldev_read_serial(int fd, const char *filename)
+ 	char *buffer;
+ 	struct bl_dev_id *dev_root, *dev_id;
+ 	unsigned int pos, len, current_id = 0;
++	size_t devid_len = sizeof(struct bl_dev_id) - sizeof(unsigned char);
+ 
+ 	status = bldev_inquire_pages(fd, 0x83, &buffer);
+ 	if (status)
+@@ -189,7 +190,11 @@ struct bl_serial *bldev_read_serial(int fd, const char *filename)
+ 	pos = 0;
+ 	current_id = 0;
+ 	len = dev_root->len;
+-	while (pos < (len - sizeof(struct bl_dev_id) + sizeof(unsigned char))) {
++
++	if (len < devid_len)
++		goto out;
++
++	while (pos < (len - devid_len)) {
+ 		dev_id = (struct bl_dev_id *)&(dev_root->data[pos]);
+ 		if ((dev_id->ids & 0xf) < current_id)
+ 			continue;
+@@ -221,8 +226,7 @@ struct bl_serial *bldev_read_serial(int fd, const char *filename)
+ 		}
+ 		if (current_id == 3)
+ 			break;
+-		pos += (dev_id->len + sizeof(struct bl_dev_id) -
+-			sizeof(unsigned char));
++		pos += (dev_id->len + devid_len);
+ 	}
+  out:
+ 	if (!serial_out)
+diff --git a/utils/blkmapd/device-process.c b/utils/blkmapd/device-process.c
+index 5fe3dff..f53a616 100644
+--- a/utils/blkmapd/device-process.c
++++ b/utils/blkmapd/device-process.c
+@@ -181,6 +181,8 @@ static int map_sig_to_device(struct bl_sig *sig, struct bl_volume *vol)
+ 		/* FIXME: should we use better algorithm for disk scan? */
+ 		mapped = verify_sig(disk, sig);
+ 		if (mapped) {
++			BL_LOG_INFO("%s: using device %s\n",
++					__func__, disk->valid_path->full_path);
+ 			vol->param.bv_dev = disk->dev;
+ 			vol->bv_size = disk->size;
+ 			break;
+diff --git a/utils/blkmapd/dm-device.c b/utils/blkmapd/dm-device.c
+index 0f4f148..24ffcbf 100644
+--- a/utils/blkmapd/dm-device.c
++++ b/utils/blkmapd/dm-device.c
+@@ -400,6 +400,8 @@ uint64_t dm_device_create(struct bl_volume *vols, int num_vols)
+ 			}
+ 			dev = node->bv_vols[0]->param.bv_dev;
+ 			tmp = table->params;
++			BL_LOG_INFO("%s: major %lu minor %lu", __func__,
++					MAJOR(dev), MINOR(dev));
+ 			if (!dm_format_dev(tmp, DM_PARAMS_LEN,
+ 					   MAJOR(dev), MINOR(dev))) {
+ 				free(table);
+@@ -459,6 +461,8 @@ uint64_t dm_device_create(struct bl_volume *vols, int num_vols)
+ 				strcpy(table->target_type, "linear");
+ 				tmp = table->params;
+ 				dev = node->bv_vols[i]->param.bv_dev;
++				BL_LOG_INFO("%s: major %lu minor %lu", __func__,
++					MAJOR(dev), MINOR(dev));
+ 				if (!dm_format_dev(tmp, DM_PARAMS_LEN,
+ 						   MAJOR(dev), MINOR(dev))) {
+ 					free(table);
+diff --git a/utils/exportfs/exportfs.c b/utils/exportfs/exportfs.c
+index 8391615..53e86ec 100644
+--- a/utils/exportfs/exportfs.c
++++ b/utils/exportfs/exportfs.c
+@@ -815,6 +815,8 @@ dump(int verbose, int export_format)
+ 				c = dumpopt(c, "insecure_locks");
+ 			if (ep->e_flags & NFSEXP_NOACL)
+ 				c = dumpopt(c, "no_acl");
++			if (ep->e_flags & NFSEXP_PNFS)
++				c = dumpopt(c, "pnfs");
+ 			if (ep->e_flags & NFSEXP_FSID)
+ 				c = dumpopt(c, "fsid=%d", ep->e_fsid);
+ 			if (ep->e_uuid)
+diff --git a/utils/exportfs/exports.man b/utils/exportfs/exports.man
+index 3d974d9..59358e6 100644
+--- a/utils/exportfs/exports.man
++++ b/utils/exportfs/exports.man
+@@ -378,6 +378,15 @@ If the client asks for alternative locations for the export point, it
+ will be given this list of alternatives. (Note that actual replication
+ of the filesystem must be handled elsewhere.)
+ 
++.TP
++.IR pnfs
++This option allows enables the use of pNFS extension if protocol level
++is NFSv4.1 or higher, and the filesystem supports pNFS exports.  With
++pNFS clients can bypass the server and perform I/O directly to storage
++devices. The default can be explicitly requested with the
++.I no_pnfs
++option.
++
+ .SS User ID Mapping
+ .PP
+ .B nfsd

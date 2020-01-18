@@ -1,0 +1,13 @@
+diff -up nfs-utils-1.3.0/systemd/rpc-statd-notify.service.org nfs-utils-1.3.0/systemd/rpc-statd-notify.service
+--- nfs-utils-1.3.0/systemd/rpc-statd-notify.service.org	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/systemd/rpc-statd-notify.service	2015-01-22 11:13:28.000000000 -0500
+@@ -3,6 +3,9 @@ Description=Notify NFS peers of a restar
+ Requires=network-online.target
+ After=network-online.target nss-lookup.target
+ 
++# Do not start up in HA environments
++ConditionPathExists=!/var/lib/nfs/statd/sm.ha
++
+ # if we run an nfs server, it needs to be running before we
+ # tell clients that it has restarted.
+ After=nfs-server.service

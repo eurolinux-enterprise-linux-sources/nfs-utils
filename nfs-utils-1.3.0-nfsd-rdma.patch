@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig nfs-utils-1.3.0/utils/nfsd/nfssvc.c
+--- nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfssvc.c	2016-05-17 10:42:05.000000000 -0400
+@@ -278,7 +278,7 @@ nfssvc_set_rdmaport(const char *port)
+ 	int fd;
+ 
+ 	if (sv)
+-		nport = sv->s_port;
++		nport = ntohs(sv->s_port);
+ 	else {
+ 		char *ep;
+ 		nport = strtol(port, &ep, 10);

@@ -1,0 +1,15 @@
+diff -up nfs-utils-1.3.0/tools/mountstats/mountstats.py.orig nfs-utils-1.3.0/tools/mountstats/mountstats.py
+--- nfs-utils-1.3.0/tools/mountstats/mountstats.py.orig	2017-04-08 15:23:53.524215286 -0400
++++ nfs-utils-1.3.0/tools/mountstats/mountstats.py	2017-04-08 15:30:45.862043179 -0400
+@@ -565,7 +565,10 @@ class DeviceData:
+         for the nfsstat command.
+         """
+         for op in new_stats.__rpc_data['ops']:
+-            self.__rpc_data[op] = list(map(add, self.__rpc_data[op], new_stats.__rpc_data[op]))
++            try:
++                self.__rpc_data[op] = list(map(add, self.__rpc_data[op], new_stats.__rpc_data[op]))
++            except KeyError:
++                continue
+ 
+     def __print_rpc_op_stats(self, op, sample_time):
+         """Print generic stats for one RPC op

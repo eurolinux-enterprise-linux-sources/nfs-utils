@@ -1,0 +1,1892 @@
+diff -up nfs-utils-1.3.0/configure.ac.orig nfs-utils-1.3.0/configure.ac
+--- nfs-utils-1.3.0/configure.ac.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/configure.ac	2017-03-28 13:43:53.000000000 -0400
+@@ -23,6 +23,12 @@ AC_ARG_WITH(statedir,
+ 	statedir=$withval,
+ 	statedir=/var/lib/nfs)
+ 	AC_SUBST(statedir)
++AC_ARG_WITH(nfsconfig,
++	[AC_HELP_STRING([--with-nfsconfig=/config/file],
++			[use general config file /config/file @<:@default=/etc/nfs.conf@:>@])],
++	nfsconfig=$withval,
++	nfsconfig=/etc/nfs.conf)
++	AC_SUBST(nfsconfig)
+ AC_ARG_WITH(statdpath,
+ 	[AC_HELP_STRING([--with-statdpath=/foo],
+ 			[define the statd state dir as /foo instead of the NFS statedir @<:@default=/var/lib/nfs@:>@])],
+@@ -442,6 +448,7 @@ dnl Export some path names to config.h
+ dnl *************************************************************
+ AC_DEFINE_UNQUOTED(NFS_STATEDIR, "$statedir", [This defines the location of the NFS state files. Warning: this must match definitions in config.mk!])
+ AC_DEFINE_UNQUOTED(NSM_DEFAULT_STATEDIR, "$statdpath", [Define this to the pathname where statd keeps its state file])
++AC_DEFINE_UNQUOTED(NFS_CONFFILE, "$nfsconfig", [This defines the location of NFS daemon config file])
+ 
+ if test "x$cross_compiling" = "xno"; then
+ 	CFLAGS_FOR_BUILD=${CFLAGS_FOR_BUILD-"$CFLAGS"}
+diff -up nfs-utils-1.3.0/support/include/conffile.h.orig nfs-utils-1.3.0/support/include/conffile.h
+--- nfs-utils-1.3.0/support/include/conffile.h.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/support/include/conffile.h	2017-03-28 13:43:53.000000000 -0400
+@@ -35,6 +35,8 @@
+ 
+ #include <sys/queue.h>
+ #include <ctype.h>
++#include <stdint.h>
++#include <stdbool.h>
+ 
+ struct conf_list_node {
+ 	TAILQ_ENTRY(conf_list_node) link;
+@@ -56,6 +58,7 @@ extern struct sockaddr *conf_get_address
+ extern struct conf_list *conf_get_list(char *, char *);
+ extern struct conf_list *conf_get_tag_list(char *, char *);
+ extern int      conf_get_num(char *, char *, int);
++extern _Bool    conf_get_bool(char *, char *, _Bool);
+ extern char    *conf_get_str(char *, char *);
+ extern char    *conf_get_section(char *, char *, char *);
+ extern void     conf_init(void);
+diff -up nfs-utils-1.3.0/support/include/xlog.h.orig nfs-utils-1.3.0/support/include/xlog.h
+--- nfs-utils-1.3.0/support/include/xlog.h.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/support/include/xlog.h	2017-03-28 13:43:53.000000000 -0400
+@@ -41,6 +41,7 @@ void			xlog_stderr(int on);
+ void			xlog_syslog(int on);
+ void			xlog_config(int fac, int on);
+ void			xlog_sconfig(char *, int on);
++void			xlog_from_conffile(char *);
+ int			xlog_enabled(int fac);
+ void			xlog(int fac, const char *fmt, ...);
+ void			xlog_warn(const char *fmt, ...);
+diff -up nfs-utils-1.3.0/support/nfs/conffile.c.orig nfs-utils-1.3.0/support/nfs/conffile.c
+--- nfs-utils-1.3.0/support/nfs/conffile.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/support/nfs/conffile.c	2017-03-28 13:43:53.000000000 -0400
+@@ -52,6 +52,7 @@
+ #pragma GCC visibility push(hidden)
+ 
+ static void conf_load_defaults(void);
++static int conf_load(int trans, char *path);
+ static int conf_set(int , char *, char *, char *, 
+ 	char *, int , int );
+ 
+@@ -107,8 +108,6 @@ struct conf_binding {
+ char *conf_path;
+ LIST_HEAD (conf_bindings, conf_binding) conf_bindings[256];
+ 
+-static char *conf_addr;
+-
+ static __inline__ u_int8_t
+ conf_hash(char *s)
+ {
+@@ -213,7 +212,7 @@ static void
+ conf_parse_line(int trans, char *line, size_t sz)
+ {
+ 	char *val, *ptr;
+-	size_t i, valsize;
++	size_t i;
+ 	size_t j;
+ 	static char *section = 0;
+ 	static char *arg = 0;
+@@ -300,18 +299,32 @@ conf_parse_line(int trans, char *line, s
+ 			}
+ 			line[strcspn (line, " \t=")] = '\0';
+ 			val = line + i + 1 + strspn (line + i + 1, " \t");
+-			valsize = 0;
+-			while (val[valsize++]);
+ 
+-			/* Skip trailing spaces and comments */
+-			for (j = 0; j < valsize; j++) {
+-				if (val[j] == '#' || val[j] == ';' || isspace(val[j])) {
+-					val[j] = '\0';
+-					break;
++			if (val[0] == '"') {
++				val ++;
++				j = strcspn(val, "\"");
++				val[j] = 0;
++			} else if (val[0] == '\'') {
++				val ++;
++				j = strcspn(val, "'");
++				val[j] = 0;
++			} else {
++				/* Skip trailing spaces and comments */
++				for (j = 0; val[j]; j++) {
++					if ((val[j] == '#' || val[j] == ';')
++					    && (j == 0 || isspace(val[j-1]))) {
++						val[j] = '\0';
++						break;
++					}
+ 				}
++				while (j && isspace(val[j-1]))
++					val[--j] = '\0';
+ 			}
+-			/* XXX Perhaps should we not ignore errors?  */
+-			conf_set(trans, section, arg, line, val, 0, 0);
++			if (strcasecmp(line, "include") == 0)
++				conf_load(trans, val);
++			else
++				/* XXX Perhaps should we not ignore errors?  */
++				conf_set(trans, section, arg, line, val, 0, 0);
+ 			return;
+ 		}
+ 	}
+@@ -368,23 +381,18 @@ conf_init (void)
+ 	conf_reinit();
+ }
+ 
+-/* Open the config file and map it into our address space, then parse it.  */
+-void
+-conf_reinit(void)
++static int
++conf_load(int trans, char *path)
+ {
+-	struct conf_binding *cb = 0;
+-	int fd, trans;
+-	unsigned int i;
+-	size_t sz;
+-	char *new_conf_addr = 0;
+ 	struct stat sb;
++	if ((stat (path, &sb) == 0) || (errno != ENOENT)) {
++		char *new_conf_addr;
++		size_t sz = sb.st_size;
++		int fd = open (path, O_RDONLY, 0);
+ 
+-	if ((stat (conf_path, &sb) == 0) || (errno != ENOENT)) {
+-		sz = sb.st_size;
+-		fd = open (conf_path, O_RDONLY, 0);
+ 		if (fd == -1) {
+-			xlog_warn("conf_reinit: open (\"%s\", O_RDONLY) failed", conf_path);
+-			return;
++			xlog_warn("conf_reinit: open (\"%s\", O_RDONLY) failed", path);
++			return -1;
+ 		}
+ 
+ 		new_conf_addr = malloc(sz);
+@@ -396,39 +404,46 @@ conf_reinit(void)
+ 		/* XXX I assume short reads won't happen here.  */
+ 		if (read (fd, new_conf_addr, sz) != (int)sz) {
+ 			xlog_warn("conf_reinit: read (%d, %p, %lu) failed",
+-   				fd, new_conf_addr, (unsigned long)sz);
++				fd, new_conf_addr, (unsigned long)sz);
+ 			goto fail;
+ 		}
+ 		close(fd);
+ 
+-		trans = conf_begin();
+ 		/* XXX Should we not care about errors and rollback?  */
+ 		conf_parse(trans, new_conf_addr, sz);
++		free(new_conf_addr);
++		return 0;
++	fail:
++		close(fd);
++		free(new_conf_addr);
+ 	}
+-	else
+-		trans = conf_begin();
++	return -1;
++}
++
++/* Open the config file and map it into our address space, then parse it.  */
++void
++conf_reinit(void)
++{
++	struct conf_binding *cb = 0;
++	int trans;
++	unsigned int i;
++
++	trans = conf_begin();
++	if (conf_load(trans, conf_path) < 0)
++		return;
+ 
+ 	/* Load default configuration values.  */
+ 	conf_load_defaults();
+ 
+ 	/* Free potential existing configuration.  */
+-	if (conf_addr) {
+-		for (i = 0; i < sizeof conf_bindings / sizeof conf_bindings[0]; i++) {
+-			cb = LIST_FIRST (&conf_bindings[i]);
+-			for (; cb; cb = LIST_FIRST (&conf_bindings[i]))
+-				conf_remove_now(cb->section, cb->tag);
+-		}
+-		free (conf_addr);
++	for (i = 0; i < sizeof conf_bindings / sizeof conf_bindings[0]; i++) {
++		cb = LIST_FIRST (&conf_bindings[i]);
++		for (; cb; cb = LIST_FIRST (&conf_bindings[i]))
++			conf_remove_now(cb->section, cb->tag);
+ 	}
+ 
+ 	conf_end(trans, 1);
+-	conf_addr = new_conf_addr;
+ 	return;
+-
+-fail:
+-	if (new_conf_addr)
+-		free(new_conf_addr);
+-	close (fd);
+ }
+ 
+ /*
+@@ -446,6 +461,38 @@ conf_get_num(char *section, char *tag, i
+ 	return def;
+ }
+ 
++/*
++ * Return the Boolean value denoted by TAG in section SECTION, or DEF
++ * if that tags does not exist.
++ * FALSE is returned for case-insensitve comparisons with 0, f, false, n, no, off
++ * TRUE is returned for 1, t, true, y, yes, on
++ * A failure to match one of these results in DEF
++ */
++_Bool
++conf_get_bool(char *section, char *tag, _Bool def)
++{
++	char *value = conf_get_str(section, tag);
++
++	if (!value)
++		return def;
++	if (strcasecmp(value, "1") == 0 ||
++	    strcasecmp(value, "t") == 0 ||
++	    strcasecmp(value, "true") == 0 ||
++	    strcasecmp(value, "y") == 0 ||
++	    strcasecmp(value, "yes") == 0 ||
++	    strcasecmp(value, "on") == 0)
++		return true;
++
++	if (strcasecmp(value, "0") == 0 ||
++	    strcasecmp(value, "f") == 0 ||
++	    strcasecmp(value, "false") == 0 ||
++	    strcasecmp(value, "n") == 0 ||
++	    strcasecmp(value, "no") == 0 ||
++	    strcasecmp(value, "off") == 0)
++		return false;
++	return def;
++}
++
+ /* Validate X according to the range denoted by TAG in section SECTION.  */
+ int
+ conf_match_num(char *section, char *tag, int x)
+@@ -476,12 +523,24 @@ char *
+ conf_get_str(char *section, char *tag)
+ {
+ 	struct conf_binding *cb;
+-
++retry:
+ 	cb = LIST_FIRST (&conf_bindings[conf_hash (section)]);
+ 	for (; cb; cb = LIST_NEXT (cb, link)) {
+ 		if (strcasecmp (section, cb->section) == 0
+-				&& strcasecmp (tag, cb->tag) == 0)
++		    && strcasecmp (tag, cb->tag) == 0) {
++			if (cb->value[0] == '$') {
++				/* expand $name from [environment] section,
++				 * or from environment
++				 */
++				char *env = getenv(cb->value+1);
++				if (env && *env)
++					return env;
++				section = "environment";
++				tag = cb->value + 1;
++				goto retry;
++			}
+ 			return cb->value;
++		}
+ 	}
+ 	return 0;
+ }
+@@ -705,6 +764,8 @@ conf_set(int transaction, char *section,
+ {
+ 	struct conf_trans *node;
+ 
++	if (!value || !*value)
++		return 0;
+ 	node = conf_trans_node(transaction, CONF_SET);
+ 	if (!node)
+ 		return 1;
+diff -up nfs-utils-1.3.0/support/nfs/xlog.c.orig nfs-utils-1.3.0/support/nfs/xlog.c
+--- nfs-utils-1.3.0/support/nfs/xlog.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/support/nfs/xlog.c	2017-03-28 13:43:53.000000000 -0400
+@@ -29,6 +29,7 @@
+ #include <syslog.h>
+ #include <errno.h>
+ #include "nfslib.h"
++#include "conffile.h"
+ 
+ #undef	VERBOSE_PRINTF
+ 
+@@ -125,6 +126,19 @@ xlog_sconfig(char *kind, int on)
+ 	xlog_config(tbl->df_fac, on);
+ }
+ 
++void
++xlog_from_conffile(char *service)
++{
++	struct conf_list *kinds;
++	struct conf_list_node *n;
++
++	kinds = conf_get_list(service, "debug");
++	if (!kinds || !kinds->cnt)
++		return;
++	TAILQ_FOREACH(n, &(kinds->fields), link)
++		xlog_sconfig(n->field, 1);
++}
++
+ int
+ xlog_enabled(int fac)
+ {
+diff -up nfs-utils-1.3.0/systemd/Makefile.am.orig nfs-utils-1.3.0/systemd/Makefile.am
+--- nfs-utils-1.3.0/systemd/Makefile.am.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/systemd/Makefile.am	2017-03-28 13:43:53.000000000 -0400
+@@ -20,7 +20,9 @@ unit_files =  \
+     proc-fs-nfsd.mount \
+     var-lib-nfs-rpc_pipefs.mount
+ 
+-EXTRA_DIST = $(unit_files)
++man5_MANS	= nfs.conf.man
++man7_MANS	= nfs.systemd.man
++EXTRA_DIST = $(unit_files) $(man5_MANS) $(man7_MANS)
+ 
+ unit_dir = /usr/lib/systemd/system
+ 
+diff -up nfs-utils-1.3.0/systemd/nfs.conf.man.orig nfs-utils-1.3.0/systemd/nfs.conf.man
+--- nfs-utils-1.3.0/systemd/nfs.conf.man.orig	2017-03-28 13:43:53.000000000 -0400
++++ nfs-utils-1.3.0/systemd/nfs.conf.man	2017-03-28 13:43:53.000000000 -0400
+@@ -0,0 +1,231 @@
++.TH NFS.CONF 5
++.SH NAME
++nfs.conf \- general configuration for NFS daemons and tools
++.SH SYNOPSIS
++.I /etc/nfs.conf
++.SH DESCRIPTION
++.PP
++This file contains site-specific configuration for various NFS daemons
++and other processes.  Most configuration can also be passed to
++processes via command line arguments, but it can be more convenient to
++have a central file.  In particular, this encourages consistent
++configuration across different processes.
++.PP
++When command line options are provided, they override values set in
++this file.  When this file does not specify a particular parameter,
++and no command line option is provided, each tool provides its own
++default values.
++.PP
++The file format supports multiple sections, each of which can contain
++multiple value assignments.  A section is introduced by a line
++containing the section name enclosed in square brackets, so
++.RS
++.B [global]
++.RE
++would introduce a section called
++.BR global .
++A value assignment is a single line that has the name of the value, an
++equals sign, and a setting for the value, so
++.RS
++.B threads = 4
++.RE
++would set the value named
++.B threads
++in the current section to
++.BR 4 .
++Leading and trailing spaces and tab
++are ignored, as are spaces and tabs surrounding the equals sign.
++Single and double quotes surrounding the assigned value are also
++removed.  If the resulting string is empty, the whole assignment
++is ignored.
++.PP
++Any line starting with
++.RB \*(lq # \*(rq
++or
++.RB \*(lq ; \*(rq
++is ignored, as is any blank line.
++.PP
++If the assigned value started with a
++.RB \*(lq $ \*(rq
++then the remainder is treated as a name and looked for in the section
++.B [environment]
++or in the processes environment (see
++.BR environ (7)).
++The value found is used for this value.
++.PP
++The value name
++.B include
++is special.  If a section contains
++.RS
++.B include = /some/file/name
++.RE
++then the named file will be read, and any value assignments found
++there-in will be added to the current section.  If the file contains
++section headers, then new sections will be created just as if the
++included file appeared in place of the
++.B include
++line.
++.PP
++Lookup of section and value names is case-insensitive.
++
++Where a Boolean value is expected, any of
++.BR true ,
++.BR t ,
++.BR yes ,
++.BR y ,
++.BR on ", or"
++.B 1
++can be used for "true", while
++.BR false ,
++.BR f ,
++.BR no ,
++.BR n ,
++.BR off ", or"
++.B 0
++can be used for "false".  Comparisons are case-insensitive.
++
++.SH SECTIONS
++The following sections are known to various programs, and can contain
++the given named values.  Most sections can also contain a
++.B debug
++value, which can be one or more from the list
++.BR general ,
++.BR call ,
++.BR auth ,
++.BR parse ,
++.BR all .
++When a list is given, the members should be comma-separated.
++.TP
++.B nfsdcltrack
++Recognized values:
++.BR storagedir .
++
++The
++.B nfsdcltrack
++program is run directly by the Linux kernel and there is no
++opportunity to provide command line arguments, so the configuration
++file is the only way to configure this program.  See
++.BR nfsdcltrack (8)
++for details.
++
++.TP
++.B nfsd
++Recognized values:
++.BR threads ,
++.BR host ,
++.BR port ,
++.BR grace-time ,
++.BR lease-time ,
++.BR udp ,
++.BR tcp ,
++.BR vers2 ,
++.BR vers3 ,
++.BR vers4 ,
++.BR vers4.0 ,
++.BR vers4.1 ,
++.BR vers4.2 ,
++.BR rdma .
++
++Version and protocol values are Boolean values as described above,
++and are also used by
++.BR rpc.mountd .
++Threads and the two times are integers.
++.B port
++and
++.B rdma
++are service names or numbers.  See
++.BR rpc.nfsd (8)
++for details.
++
++.TP
++.B mountd
++Recognized values:
++.BR manage-gids ,
++.BR descriptors ,
++.BR port ,
++.BR threads ,
++.BR reverse-lookup ,
++.BR state-directory-path ,
++.BR ha-callout .
++
++These, together with the protocol and version values in the
++.B [nfsd]
++section, are used to configure mountd.  See
++.BR rpc.mountd (8)
++for details.
++
++.TP
++.B statd
++Recognized values:
++.BR port ,
++.BR outgoing-port ,
++.BR name ,
++.BR state-directory-path ,
++.BR ha-callout .
++
++See
++.BR rpc.statd (8)
++for details.
++
++.TP
++.B lockd
++Recognized values:
++.B port
++and
++.BR udp-port .
++
++See
++.BR rpc.statd (8)
++for details.
++
++.TP
++.B sm-notify
++Recognized values:
++.BR retry-time ,
++.BR outgoing-port ", and"
++.BR outgoing-addr .
++
++See
++.BR sm-notify (8)
++for details.
++
++.TP
++.B gssd
++Recognized values:
++.BR use-memcache ,
++.BR use-machine-creds ,
++.BR avoid-dns ,
++.BR limit-to-legacy-enctypes ,
++.BR context-timeout ,
++.BR rpc-timeout ,
++.BR pipefs-directory ,
++.BR keytab-file ,
++.BR cred-cache-directory ,
++.BR preferred-realm .
++
++See
++.BR rpc.gssd (8)
++for details.
++
++.TP
++.B svcgssd
++Recognized values:
++.BR principal .
++
++See
++.BR rpc.svcgssd (8)
++for details.
++
++.TP
++.B exportfs
++Only
++.B debug=
++is recognized.
++
++.SH FILES
++.I /etc/nfs.conf
++.SH SEE ALSO
++.BR nfsdcltrack (8),
++.BR rpc.nfsd (8),
++.BR rpc.mountd (8),
++.BR nfsmount.conf (5).
+diff -up nfs-utils-1.3.0/systemd/nfs.systemd.man.orig nfs-utils-1.3.0/systemd/nfs.systemd.man
+--- nfs-utils-1.3.0/systemd/nfs.systemd.man.orig	2017-03-28 13:45:11.000000000 -0400
++++ nfs-utils-1.3.0/systemd/nfs.systemd.man	2017-03-28 13:45:11.000000000 -0400
+@@ -0,0 +1,167 @@
++.TH NFS.SYSTEMD 7
++.SH NAME
++nfs.systemd \- managing NFS services through systemd.
++.SH SYNOPSIS
++nfs-utils.service
++.br
++nfs-server.service
++.br
++nfs-client.target
++.br
++.I etc
++.SH DESCRIPTION
++The
++.I nfs-utils
++package provides a suite of
++.I systemd
++unit files which allow the various services to be started and
++managed.  These unit files ensure that the services are started in the
++correct order, and the prerequisites are active before dependant
++services start.  As there are quite  few unit files, it is not
++immediately obvious how best to achieve certain results.  The
++following subsections attempt to cover the issues that are most likely
++to come up.
++.SS Configuration
++The standard systemd unit files do not provide any easy way to pass
++any command line arguments to daemons so as to configure their
++behavior.  In many case such configuration can be performed by making
++changes to
++.I /etc/nfs.conf
++or other configuration files.  When that is not convenient, a
++distribution might provide systemd "drop-in" files which replace the
++.B ExecStart=
++setting to start the program with different arguments.  For example a
++drop-in file
++.B systemd/system/nfs-mountd.service.d/local.conf
++containing
++.RS
++.nf
++[Service]
++EnvironmentFile=/etc/sysconfig/nfs
++ExecStart=
++ExecStart= /usr/sbin/rpc.mountd $RPCMOUNTDOPTS
++.fi
++.RE
++would cause the
++.B nfs-mountd.service
++unit to run the
++.I rpc.mountd
++program using, for arguments, the value given for
++.B RPCMOUNTDOPTS
++in
++.IR /etc/sysconfig/nfs .
++This allows for seamless integration with existing configuration
++tools.
++.SS Enabling unit files
++There are three unit files which are designed to be manually enabled.
++All others are automatically run as required.  The three are:
++.TP
++.B nfs-client.target
++This should be enabled on any host which ever serves as an NFS client.
++There is little cost in transparently enabling it whenever NFS client
++software is installed.
++.TP
++.B nfs-server.service
++This must be enabled to provide NFS service to clients.  It starts and
++configures the required daemons in the required order.
++.TP
++.B nfs-blkmap.service
++The
++.B blkmapd
++daemon is only required on NFS clients which are using pNFS (parallel
++NFS), and particularly using the
++.B blocklayout
++layout protocol.  If you might use this particular extension to NFS,
++the
++.B nfs-blkmap.service
++unit should be enabled.
++.PP
++Several other units which might be considered to be optional, such as
++.I rpc-gssd.service
++are careful to only start if the required configuration file exists.
++.I rpc-gsdd.service
++will not start if the
++.I krb5.keytab
++file does not exist (typically in
++.IR /etc ).
++.SS Restarting NFS services
++Most NFS daemons can be restarted at any time.  They will reload any
++state that they need, and continue servicing requests.  This is rarely
++necessary though.
++.PP
++When configuration changesare make, it can be hard to know exactly
++which services need to be restarted to ensure that the configuration
++takes effect.  The simplest approach, which is often the best, is to
++restart everything.  To help with this, the
++.B nfs-utils.service
++unit is provided.  It declares appropriate dependencies with other
++unit files so that
++.RS
++.B systemctl restart nfs-utils
++.RE
++will restart all NFS daemons that are running.  This will cause all
++configuration changes to take effect
++.I except
++for changes to mount options lists in
++.I /etc/fstab
++or
++.IR /etc/nfsmount.conf .
++Mount options can only be changed by unmounting and remounting
++filesystem.  This can be a disruptive operation so it should only be
++done when the value justifies the cost.  The command
++.RS
++.B umount -a -t nfs; mount -a -t nfs
++.RE
++should unmount and remount all NFS filesystems.
++.SS Masking unwanted services
++Rarely there may be a desire to prohibit some services from running
++even though there are normally part of a working NFS system.  This may
++be needed to reduce system load to an absolute minimum, or to reduce
++attack surface by not running daemons that are not absolutely
++required.
++.PP
++Two particular services which this can apply to are
++.I rpcbind
++and
++.IR idmapd .
++.I rpcbind
++is not part of the
++.I nfs-utils
++package, but it used by several NFS services.  However it is
++.B not
++needed when only NFSv4 is in use.  If a site will never use NFSv3 (or
++NFSv2) and does not want
++.I rpcbind
++to be running, the correct approach is to run
++.RS
++.B systemctl mask rpcbind
++.RE
++This will disable
++.IR rpcbind ,
++and the various NFS services which depend on it (and are only needed
++for NFSv3) will refuse to start, without interfering with the
++operation of NFSv4 services.  In particular,
++.I rpc.statd
++will not run when
++.I rpcbind
++is masked.
++.PP
++.I idmapd
++is only needed for NFSv4, and even then is not needed when the client
++and server agree to use user-ids rather than user-names to identify the
++owners of files.  If
++.I idmapd
++is not needed and not wanted, it can be masked with
++.RS
++.B systemctl mask idmapd
++.RE
++.SH FILES
++/etc/nfs.conf
++.br
++/etc/nfsmount.conf
++.br
++/etc/idmapd.conf
++.SH SEE ALSO
++.BR systemd.unit (5),
++.BR nfs.conf (5),
++.BR nfsmount.conf (5).
+diff -up nfs-utils-1.3.0/systemd/rpc-statd.service.orig nfs-utils-1.3.0/systemd/rpc-statd.service
+--- nfs-utils-1.3.0/systemd/rpc-statd.service.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/systemd/rpc-statd.service	2017-03-28 13:43:53.000000000 -0400
+@@ -11,7 +11,8 @@ Wants=nfs-config.service
+ After=nfs-config.service
+ 
+ [Service]
++Environment=RPC_STATD_NO_NOTIFY=1
+ EnvironmentFile=-/run/sysconfig/nfs-utils
+ Type=forking
+ PIDFile=/var/run/rpc.statd.pid
+-ExecStart=/usr/sbin/rpc.statd --no-notify $STATDARGS
++ExecStart=/usr/sbin/rpc.statd $STATDARGS
+diff -up nfs-utils-1.3.0/utils/exportfs/exportfs.c.orig nfs-utils-1.3.0/utils/exportfs/exportfs.c
+--- nfs-utils-1.3.0/utils/exportfs/exportfs.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/exportfs/exportfs.c	2017-03-28 13:43:53.000000000 -0400
+@@ -37,6 +37,7 @@
+ #include "nfslib.h"
+ #include "exportfs.h"
+ #include "xlog.h"
++#include "conffile.h"
+ 
+ static void	export_all(int verbose);
+ static void	exportfs(char *arg, char *options, int verbose);
+@@ -53,6 +54,7 @@ static void release_lockfile(void);
+ 
+ static const char *lockfile = EXP_LOCKFILE;
+ static int _lockfd = -1;
++char *conf_path = NFS_CONFFILE;
+ 
+ /*
+  * If we aren't careful, changes made by exportfs can be lost
+@@ -108,6 +110,9 @@ main(int argc, char **argv)
+ 	xlog_stderr(1);
+ 	xlog_syslog(0);
+ 
++	conf_init();
++	xlog_from_conffile("exportfs");
++
+ 	while ((c = getopt(argc, argv, "ad:fhio:ruvs")) != EOF) {
+ 		switch(c) {
+ 		case 'a':
+diff -up nfs-utils-1.3.0/utils/exportfs/exportfs.man.orig nfs-utils-1.3.0/utils/exportfs/exportfs.man
+--- nfs-utils-1.3.0/utils/exportfs/exportfs.man.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/exportfs/exportfs.man	2017-03-28 13:43:53.000000000 -0400
+@@ -90,6 +90,13 @@ to be added to the kernel's export table
+ .TP
+ .B \-d kind " or " \-\-debug kind
+ Turn on debugging. Valid kinds are: all, auth, call, general and parse.
++Debugging can also be turned on by setting
++.B debug=
++in the
++.B [exportfs]
++section of
++.IR /etc/nfs.conf .
++
+ .TP
+ .B -a
+ Export or unexport all directories.
+@@ -295,6 +302,7 @@ master table of exports
+ table of clients accessing server's exports
+ .SH SEE ALSO
+ .BR exports (5),
++.BR nfs.conf (5),
+ .BR rpc.mountd (8),
+ .BR netgroup (5)
+ .SH AUTHORS
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.c.orig nfs-utils-1.3.0/utils/gssd/gssd.c
+--- nfs-utils-1.3.0/utils/gssd/gssd.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.c	2017-03-28 13:43:53.000000000 -0400
+@@ -71,6 +71,7 @@
+ #include "gss_util.h"
+ #include "krb5_util.h"
+ #include "nfslib.h"
++#include "conffile.h"
+ 
+ static char *pipefs_path = GSSD_PIPEFS_DIR;
+ static DIR *pipefs_dir;
+@@ -78,6 +79,7 @@ static int pipefs_fd;
+ static int inotify_fd;
+ struct event inotify_ev;
+ 
++char *conf_path = NFS_CONFFILE;
+ char *keytabfile = GSSD_DEFAULT_KEYTAB_FILE;
+ char **ccachesearch;
+ int  use_memcache = 0;
+@@ -831,6 +833,33 @@ main(int argc, char *argv[])
+ 	char *progname;
+ 	char *ccachedir = NULL;
+ 	struct event sighup_ev;
++	char *s;
++
++	conf_init();
++	use_memcache = conf_get_bool("gssd", "use-memcache", use_memcache);
++	root_uses_machine_creds = conf_get_bool("gssd", "use-machine-creds",
++						root_uses_machine_creds);
++	avoid_dns = conf_get_bool("gssd", "avoid-dns", avoid_dns);
++#ifdef HAVE_SET_ALLOWABLE_ENCTYPES
++	limit_to_legacy_enctypes = conf_get_bool("gssd", "limit-to-legacy-enctypes",
++						 limit_to_legacy_enctypes);
++#endif
++	context_timeout = conf_get_num("gssd", "context-timeout", context_timeout);
++	rpc_timeout = conf_get_num("gssd", "rpc-timeout", rpc_timeout);
++	s = conf_get_str("gssd", "pipefs-directory");
++	if (!s)
++		s = conf_get_str("general", "pipefs-directory");
++	if (s)
++		pipefs_path = s;
++	s = conf_get_str("gssd", "keytab-file");
++	if (s)
++		keytabfile = s;
++	s = conf_get_str("gssd", "cred-cache-directory");
++	if (s)
++		ccachedir = s;
++	s = conf_get_str("gssd", "preferred-realm");
++	if (s)
++		preferred_realm = s;
+ 
+ 	while ((opt = getopt(argc, argv, "DfvrlmnMp:k:d:t:T:R:")) != -1) {
+ 		switch (opt) {
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.man.orig nfs-utils-1.3.0/utils/gssd/gssd.man
+--- nfs-utils-1.3.0/utils/gssd/gssd.man.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.man	2017-03-28 13:43:53.000000000 -0400
+@@ -297,6 +297,60 @@ The default timeout is set to 5 seconds.
+ If you get messages like "WARNING: can't create tcp rpc_clnt to server
+ %servername% for user with uid %uid%: RPC: Remote system error -
+ Connection timed out", you should consider an increase of this timeout.
++.SH CONFIGURATION FILE
++Many of the options that can be set on the command line can also be
++controlled through values set in the
++.B [gssd]
++section of the
++.I /etc/nfs.conf
++configuration file.  Values recognized include:
++.TP
++.B use-memcache
++A Boolean flag equivalent to
++.BR -M .
++.TP
++.B use-machine-creds
++A Boolean flag. Setting to
++.B false
++is equivalent to giving the
++.B -n
++flag.
++.TP
++.B avoid-dns
++Setting to
++.B false
++is equivalent to providing the
++.B -D
++flag.
++.TP
++.B limit-to-legacy-enctypes
++Equivalent to
++.BR -l .
++.TP
++.B context-timeout
++Equivalent to
++.BR -T .
++.TP
++.B rpc-timeout
++Equivalent to
++.BR -t .
++.TP
++.B pipefs-directory
++Equivalent to
++.BR -p .
++.TP
++.B keytab-file
++Equivalent to
++.BR -k .
++.TP
++.BR cred-cache-directory
++Equivalent to
++.BR -d .
++.TP
++.B preferred-realm
++Equivalent to
++.BR -R .
++
+ .SH SEE ALSO
+ .BR rpc.svcgssd (8),
+ .BR kerberos (1),
+diff -up nfs-utils-1.3.0/utils/gssd/svcgssd.c.orig nfs-utils-1.3.0/utils/gssd/svcgssd.c
+--- nfs-utils-1.3.0/utils/gssd/svcgssd.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/svcgssd.c	2017-03-28 13:43:53.000000000 -0400
+@@ -61,6 +61,9 @@
+ #include "svcgssd.h"
+ #include "gss_util.h"
+ #include "err_util.h"
++#include "conffile.h"
++
++char *conf_path = NFS_CONFFILE;
+ 
+ void
+ sig_die(int signal)
+@@ -98,6 +101,17 @@ main(int argc, char *argv[])
+ 	extern char *optarg;
+ 	char *progname;
+ 	char *principal = NULL;
++	char *s;
++
++	conf_init();
++
++	s = conf_get_str("svcgssd", "principal");
++	if (!s)
++		;
++	else if (strcmp(s, "system")== 0)
++		get_creds = 0;
++	else
++		principal = s;
+ 
+ 	while ((opt = getopt(argc, argv, "fivrnp:")) != -1) {
+ 		switch (opt) {
+diff -up nfs-utils-1.3.0/utils/gssd/svcgssd.man.orig nfs-utils-1.3.0/utils/gssd/svcgssd.man
+--- nfs-utils-1.3.0/utils/gssd/svcgssd.man.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/svcgssd.man	2017-03-28 13:43:53.000000000 -0400
+@@ -45,6 +45,23 @@ Use the system default credentials
+ .RI (host/ FQDN @ REALM )
+ rather than the default
+ .RI nfs/ FQDN @ REALM .
++.SH CONFIGURATION FILE
++Some of the options that can be set on the command line can also be
++controlled through values set in the
++.B [svcgssd]
++section of the
++.I /etc/nfs.conf
++configuration file.  Values recognized include:
++.TP
++.B principal
++If set to
++.B system
++this is equivalent to the
++.B -n
++option.  If set to any other value, that is used like the
++.B -p
++option.
++
+ .SH SEE ALSO
+ .BR rpc.gssd(8),
+ .SH AUTHORS
+diff -up nfs-utils-1.3.0/utils/mountd/mountd.c.orig nfs-utils-1.3.0/utils/mountd/mountd.c
+--- nfs-utils-1.3.0/utils/mountd/mountd.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/mountd/mountd.c	2017-03-28 13:43:53.000000000 -0400
+@@ -22,6 +22,8 @@
+ #include <fcntl.h>
+ #include <sys/resource.h>
+ #include <sys/wait.h>
++
++#include "conffile.h"
+ #include "xmalloc.h"
+ #include "misc.h"
+ #include "mountd.h"
+@@ -39,6 +41,8 @@ int new_cache = 0;
+ int manage_gids;
+ int use_ipaddr = -1;
+ 
++char *conf_path = NFS_CONFFILE;
++
+ /* PRC: a high-availability callout program can be specified with -H
+  * When this is done, the program will receive callouts whenever clients
+  * send mount or unmount requests -- the callout is not needed for 2.6 kernel */
+@@ -692,6 +696,7 @@ main(int argc, char **argv)
+ 	char	*export_file = _PATH_EXPORTS;
+ 	char    *state_dir = NFS_STATEDIR;
+ 	char	*progname;
++	char	*s;
+ 	unsigned int listeners = 0;
+ 	int	foreground = 0;
+ 	int	port = 0;
+@@ -707,6 +712,38 @@ main(int argc, char **argv)
+ 	else
+ 		progname = argv[0];
+ 
++	conf_init();
++	xlog_from_conffile("mountd");
++	manage_gids = conf_get_bool("mountd", "manage-gids", manage_gids);
++	descriptors = conf_get_num("mountd", "descriptors", descriptors);
++	port = conf_get_num("mountd", "port", port);
++	num_threads = conf_get_num("mountd", "threads", num_threads);
++	reverse_resolve = conf_get_bool("mountd", "reverse-lookup", reverse_resolve);
++	ha_callout_prog = conf_get_str("mountd", "ha-callout");
++
++	s = conf_get_str("mountd", "state-directory-path");
++	if (s)
++		state_dir = s;
++
++	/* NOTE: following uses "nfsd" section of nfs.conf !!!! */
++	if (conf_get_bool("nfsd", "udp", NFSCTL_UDPISSET(_rpcprotobits)))
++		NFSCTL_UDPSET(_rpcprotobits);
++	else
++		NFSCTL_UDPUNSET(_rpcprotobits);
++	if (conf_get_bool("nfsd", "tcp", NFSCTL_TCPISSET(_rpcprotobits)))
++		NFSCTL_TCPSET(_rpcprotobits);
++	else
++		NFSCTL_TCPUNSET(_rpcprotobits);
++	for (vers = 2; vers <= 4; vers++) {
++		char tag[10];
++		sprintf(tag, "vers%d", vers);
++		if (conf_get_bool("nfsd", tag, NFSCTL_VERISSET(nfs_version, vers)))
++			NFSCTL_VERSET(nfs_version, vers);
++		else
++			NFSCTL_VERUNSET(nfs_version, vers);
++	}
++
++
+ 	/* Parse the command line options and arguments. */
+ 	opterr = 0;
+ 	while ((c = getopt_long(argc, argv, "o:nFd:f:p:P:hH:N:V:vurs:t:g", longopts, NULL)) != EOF)
+diff -up nfs-utils-1.3.0/utils/mountd/mountd.man.orig nfs-utils-1.3.0/utils/mountd/mountd.man
+--- nfs-utils-1.3.0/utils/mountd/mountd.man.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/mountd/mountd.man	2017-03-28 13:43:53.000000000 -0400
+@@ -207,6 +207,39 @@ the server. Note that the 'primary' grou
+ .B newgroup
+ command on the client will still be effective.  This function requires
+ a Linux Kernel with version at least 2.6.21.
++
++.SH CONFIGURATION FILE
++Many of the options that can be set on the command line can also be
++controlled through values set in the
++.B [mountd]
++or, in some cases, the
++.B [nfsd]
++sections of the
++.I /etc/nfs.conf
++configuration file.
++Values recognized in the
++.B [mountd]
++section include
++.BR manage-gids ,
++.BR descriptors ,
++.BR port ,
++.BR threads ,
++.BR reverse-lookup ", and"
++.BR state-directory-path ,
++.B ha-callout
++which each have the same effect as the option with the same name.
++
++The values recognized in the
++.B [nfsd]
++section include
++.BR TCP ,
++.BR UDP ,
++.BR vers2 ,
++.BR vers3 ", and"
++.B vers4
++which each have same same meaning as given by
++.BR rpc.nfsd (8).
++
+ .SH TCP_WRAPPERS SUPPORT
+ You can protect your
+ .B rpc.mountd
+@@ -261,6 +294,7 @@ table of clients accessing server's expo
+ .BR rpc.nfsd (8),
+ .BR rpc.rquotad (8),
+ .BR nfs (5),
++.BR nfs.conf (5),
+ .BR tcpd (8),
+ .BR hosts_access (5),
+ .BR iptables (8),
+diff -up nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c.orig nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c
+--- nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.c	2017-03-28 13:43:53.000000000 -0400
+@@ -43,6 +43,7 @@
+ #include <sys/capability.h>
+ #endif
+ 
++#include "conffile.h"
+ #include "xlog.h"
+ #include "sqlite.h"
+ 
+@@ -55,6 +56,8 @@
+ /* defined by RFC 3530 */
+ #define NFS4_OPAQUE_LIMIT	1024
+ 
++char *conf_path = NFS_CONFFILE;
++
+ /* private data structures */
+ struct cltrack_cmd {
+ 	char *name;
+@@ -553,6 +556,7 @@ int
+ main(int argc, char **argv)
+ {
+ 	char arg;
++	char *val;
+ 	int rc = 0;
+ 	char *progname, *cmdarg = NULL;
+ 	struct cltrack_cmd *cmd;
+@@ -562,6 +566,15 @@ main(int argc, char **argv)
+ 	xlog_syslog(1);
+ 	xlog_stderr(0);
+ 
++	conf_init();
++	xlog_from_conffile("nfsdcltrack");
++	val = conf_get_str("nfsdcltrack", "storagedir");
++	if (val)
++		storagedir = val;
++	rc = conf_get_num("nfsdcltrack", "debug", 0);
++	if (rc > 0)
++		xlog_config(D_ALL, 1);
++
+ 	/* process command-line options */
+ 	while ((arg = getopt_long(argc, argv, "hdfs:", longopts,
+ 				  NULL)) != EOF) {
+diff -up nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.man.orig nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.man
+--- nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.man.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsdcltrack/nfsdcltrack.man	2017-03-28 13:43:53.000000000 -0400
+@@ -66,6 +66,20 @@ Check to see if a nfs_client_id4 is allo
+ .IP "\fBgracedone\fR" 4
+ .IX Item "gracedone"
+ Remove any unreclaimed client records from the database. This command requires a epoch boot time as an argument.
++.SH "EXTERNAL CONFIGURATION"
++The directory for stable storage information can be set via the file
++.B /etc/nfs.conf
++by setting the
++.B storagedir
++value in the
++.B nfsdcltrack
++section.  For example:
++.in +5
++[nfsdcltrack]
++.br
++  storagedir = /shared/nfs/nfsdcltrack
++.in -5
++Debuging to syslog can also be enabled by setting "debug = 1" in this file.
+ .SH "LEGACY TRANSITION MECHANISM"
+ .IX Header "LEGACY TRANSITION MECHANISM"
+ The Linux kernel NFSv4 server has historically tracked this information
+diff -up nfs-utils-1.3.0/utils/nfsd/nfsd.c.orig nfs-utils-1.3.0/utils/nfsd/nfsd.c
+--- nfs-utils-1.3.0/utils/nfsd/nfsd.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfsd.c	2017-03-28 13:43:53.000000000 -0400
+@@ -23,14 +23,18 @@
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ 
++#include "conffile.h"
+ #include "nfslib.h"
+ #include "nfssvc.h"
+ #include "xlog.h"
++#include "xcommon.h"
+ 
+ #ifndef NFSD_NPROC
+ #define NFSD_NPROC 8
+ #endif
+ 
++char *conf_path = NFS_CONFFILE;
++
+ static void	usage(const char *);
+ 
+ static struct option longopts[] =
+@@ -51,50 +55,6 @@ static struct option longopts[] =
+ 	{ NULL, 0, 0, 0 }
+ };
+ 
+-/* given a family and ctlbits, disable any that aren't listed in netconfig */
+-#ifdef HAVE_LIBTIRPC
+-static void
+-nfsd_enable_protos(unsigned int *proto4, unsigned int *proto6)
+-{
+-	struct netconfig *nconf;
+-	unsigned int *famproto;
+-	void *handle;
+-
+-	xlog(D_GENERAL, "Checking netconfig for visible protocols.");
+-
+-	handle = setnetconfig();
+-	while((nconf = getnetconfig(handle))) {
+-		if (!(nconf->nc_flag & NC_VISIBLE))
+-			continue;
+-
+-		if (!strcmp(nconf->nc_protofmly, NC_INET))
+-			famproto = proto4;
+-		else if (!strcmp(nconf->nc_protofmly, NC_INET6))
+-			famproto = proto6;
+-		else
+-			continue;
+-
+-		if (!strcmp(nconf->nc_proto, NC_TCP))
+-			NFSCTL_TCPSET(*famproto);
+-		else if (!strcmp(nconf->nc_proto, NC_UDP))
+-			NFSCTL_UDPSET(*famproto);
+-
+-		xlog(D_GENERAL, "Enabling %s %s.", nconf->nc_protofmly,
+-			nconf->nc_proto);
+-	}
+-	endnetconfig(handle);
+-	return;
+-}
+-#else /* HAVE_LIBTIRPC */
+-static void
+-nfsd_enable_protos(unsigned int *proto4, unsigned int *proto6)
+-{
+-	/* Enable all IPv4 protocols if no TIRPC support */
+-	*proto4 = NFSCTL_ALLBITS;
+-	*proto6 = 0;
+-}
+-#endif /* HAVE_LIBTIRPC */
+-
+ int
+ main(int argc, char **argv)
+ {
+@@ -102,44 +62,91 @@ main(int argc, char **argv)
+ 	char *p, *progname, *port, *rdma_port = NULL;
+ 	char **haddr = NULL;
+ 	int hcounter = 0;
++	struct conf_list *hosts;
+ 	int	socket_up = 0;
+ 	unsigned int minorvers = 0;
+ 	unsigned int minorversset = 0;
+ 	unsigned int versbits = NFSCTL_VERDEFAULT;
+ 	unsigned int protobits = NFSCTL_ALLBITS;
+-	unsigned int proto4 = 0;
+-	unsigned int proto6 = 0;
+ 	int grace = -1;
+ 	int lease = -1;
+ 
+-	progname = strdup(basename(argv[0]));
+-	if (!progname) {
+-		fprintf(stderr, "%s: unable to allocate memory.\n", argv[0]);
+-		exit(1);
+-	}
+-
+-	port = strdup("nfs");
+-	if (!port) {
+-		fprintf(stderr, "%s: unable to allocate memory.\n", progname);
+-		exit(1);
+-	}
+-
+-	haddr = malloc(sizeof(char *));
+-	if (!haddr) {
+-		fprintf(stderr, "%s: unable to allocate memory.\n", progname);
+-		exit(1);
+-	}
++	progname = basename(argv[0]);
++	haddr = xmalloc(sizeof(char *));
+ 	haddr[0] = NULL;
+ 
+ 	xlog_syslog(0);
+ 	xlog_stderr(1);
+ 
++	conf_init();
++	xlog_from_conffile("nfsd");
++	count = conf_get_num("nfsd", "threads", count);
++	grace = conf_get_num("nfsd", "grace-time", grace);
++	lease = conf_get_num("nfsd", "lease-time", lease);
++	port = conf_get_str("nfsd", "port");
++	if (!port)
++		port = "nfs";
++	rdma_port = conf_get_str("nfsd", "rdma");
++	if (conf_get_bool("nfsd", "udp", NFSCTL_UDPISSET(protobits)))
++		NFSCTL_UDPSET(protobits);
++	else
++		NFSCTL_UDPUNSET(protobits);
++	if (conf_get_bool("nfsd", "tcp", NFSCTL_TCPISSET(protobits)))
++		NFSCTL_TCPSET(protobits);
++	else
++		NFSCTL_TCPUNSET(protobits);
++	for (i = 2; i <= 4; i++) {
++		char tag[10];
++		sprintf(tag, "vers%d", i);
++		if (conf_get_bool("nfsd", tag, NFSCTL_VERISSET(versbits, i)))
++			NFSCTL_VERSET(versbits, i);
++		else
++			NFSCTL_VERUNSET(versbits, i);
++	}
++	/* We assume the kernel will default all minor versions to 'on',
++	 * and allow the config file to disable some.
++	 */
++	for (i = NFS4_MINMINOR; i <= NFS4_MAXMINOR; i++) {
++		char tag[20];
++		sprintf(tag, "vers4.%d", i);
++		/* The default for minor version support is to let the
++		 * kernel decide.  We could ask the kernel what that choice
++		 * will be, but that is needlessly complex.
++		 * Instead, perform a config-file lookup using each of the
++		 * two possible default.  If the result is different from the
++		 * default, then impose that value, else don't make a change
++		 * (i.e. don't set the bit in minorversset).
++		 */
++		if (!conf_get_bool("nfsd", tag, 1)) {
++			NFSCTL_VERSET(minorversset, i);
++			NFSCTL_VERUNSET(minorvers, i);
++		}
++		if (conf_get_bool("nfsd", tag, 0)) {
++			NFSCTL_VERSET(minorversset, i);
++			NFSCTL_VERSET(minorvers, i);
++		}
++	}
++
++	hosts = conf_get_list("nfsd", "host");
++	if (hosts && hosts->cnt) {
++		struct conf_list_node *n;
++		haddr = realloc(haddr, sizeof(char*) * hosts->cnt);
++		TAILQ_FOREACH(n, &(hosts->fields), link) {
++			haddr[hcounter] = n->field;
++			hcounter++;
++		}
++	}
++
+ 	while ((c = getopt_long(argc, argv, "dH:hN:V:p:P:sTUrG:L:", longopts, NULL)) != EOF) {
+ 		switch(c) {
+ 		case 'd':
+ 			xlog_config(D_ALL, 1);
+ 			break;
+ 		case 'H':
++			if (hosts) {
++				hosts = NULL;
++				hcounter = 0;
++			}
+ 			if (hcounter) {
+ 				haddr = realloc(haddr, sizeof(char*) * hcounter+1);
+ 				if(!haddr) {
+@@ -148,30 +155,13 @@ main(int argc, char **argv)
+ 					exit(1);
+ 				}
+ 			}
+-			haddr[hcounter] = strdup(optarg);
+-			if (!haddr[hcounter]) {
+-				fprintf(stderr, "%s: unable to allocate "
+-					"memory.\n", progname);
+-				exit(1);
+-			}
++			haddr[hcounter] = optarg;
+ 			hcounter++;
+ 			break;
+ 		case 'P':	/* XXX for nfs-server compatibility */
+ 		case 'p':
+ 			/* only the last -p option has any effect */
+-			portnum = atoi(optarg);
+-			if (portnum <= 0 || portnum > 65535) {
+-				fprintf(stderr, "%s: bad port number: %s\n",
+-					progname, optarg);
+-				usage(progname);
+-			}
+-			free(port);
+-			port = strdup(optarg);
+-			if (!port) {
+-				fprintf(stderr, "%s: unable to allocate "
+-						"memory.\n", progname);
+-				exit(1);
+-			}
++			port = optarg;
+ 			break;
+ 		case 'r':
+ 			rdma_port = "nfsrdma";
+@@ -188,7 +178,7 @@ main(int argc, char **argv)
+ 			case 4:
+ 				if (*p == '.') {
+ 					int i = atoi(p+1);
+-					if (i > NFS4_MAXMINOR) {
++					if (i < NFS4_MINMINOR || i > NFS4_MAXMINOR) {
+ 						fprintf(stderr, "%s: unsupported minor version\n", optarg);
+ 						exit(1);
+ 					}
+@@ -210,7 +200,7 @@ main(int argc, char **argv)
+ 			case 4:
+ 				if (*p == '.') {
+ 					int i = atoi(p+1);
+-					if (i > NFS4_MAXMINOR) {
++					if (i < NFS4_MINMINOR || i > NFS4_MAXMINOR) {
+ 						fprintf(stderr, "%s: unsupported minor version\n", optarg);
+ 						exit(1);
+ 					}
+@@ -277,18 +267,6 @@ main(int argc, char **argv)
+ 
+ 	xlog_open(progname);
+ 
+-	nfsd_enable_protos(&proto4, &proto6);
+-
+-	if (!NFSCTL_TCPISSET(protobits)) {
+-		NFSCTL_TCPUNSET(proto4);
+-		NFSCTL_TCPUNSET(proto6);
+-	}
+-
+-	if (!NFSCTL_UDPISSET(protobits)) {
+-		NFSCTL_UDPUNSET(proto4);
+-		NFSCTL_UDPUNSET(proto6);
+-	}
+-
+ 	/* make sure that at least one version is enabled */
+ 	found_one = 0;
+ 	for (c = NFSD_MINVERS; c <= NFSD_MAXVERS; c++) {
+@@ -301,8 +279,7 @@ main(int argc, char **argv)
+ 	}
+ 
+ 	if (NFSCTL_VERISSET(versbits, 4) &&
+-	    !NFSCTL_TCPISSET(proto4) &&
+-	    !NFSCTL_TCPISSET(proto6)) {
++	    !NFSCTL_TCPISSET(protobits)) {
+ 		xlog(L_ERROR, "version 4 requires the TCP protocol");
+ 		exit(1);
+ 	}
+@@ -336,15 +313,10 @@ main(int argc, char **argv)
+ 
+ 	i = 0;
+ 	do {
+-		error = nfssvc_set_sockets(AF_INET, proto4, haddr[i], port);
+-		if (!error)
+-			socket_up = 1;
+-#ifdef IPV6_SUPPORTED
+-		error = nfssvc_set_sockets(AF_INET6, proto6, haddr[i], port);
++		error = nfssvc_set_sockets(protobits, haddr[i], port);
+ 		if (!error)
+ 			socket_up = 1;
+-#endif /* IPV6_SUPPORTED */
+-	} while (++i < hcounter); 
++	} while (++i < hcounter);
+ 
+ 	if (rdma_port) {
+ 		error = nfssvc_set_rdmaport(rdma_port);
+@@ -381,11 +353,7 @@ set_threads:
+ 	if ((error = nfssvc_threads(portnum, count)) < 0)
+ 		xlog(L_ERROR, "error starting threads: errno %d (%m)", errno);
+ out:
+-	free(port);
+-	for(i=0; i < hcounter; i++)
+-		free(haddr[i]);
+ 	free(haddr);
+-	free(progname);
+ 	return (error != 0);
+ }
+ 
+diff -up nfs-utils-1.3.0/utils/nfsd/nfsd.man.orig nfs-utils-1.3.0/utils/nfsd/nfsd.man
+--- nfs-utils-1.3.0/utils/nfsd/nfsd.man.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfsd.man	2017-03-28 13:43:53.000000000 -0400
+@@ -57,7 +57,7 @@ This option can be used to request that
+ .B rpc.nfsd
+ does not offer certain versions of NFS. The current version of
+ .B rpc.nfsd
+-can support NFS versions 2,3,4 and the newer version 4.1.
++can support major NFS versions 2,3,4 and the minor versions 4.1 and 4.2.
+ .TP
+ .B \-s " or " \-\-syslog
+ By default,
+@@ -82,7 +82,7 @@ This option can be used to request that
+ .B rpc.nfsd
+ offer certain versions of NFS. The current version of
+ .B rpc.nfsd
+-can support NFS versions 2,3,4 and the newer version 4.1.
++can support major NFS versions 2,3,4 and the minor versions 4.1 and 4.2.
+ .TP
+ .B \-L " or " \-\-lease-time seconds
+ Set the lease-time used for NFSv4.  This corresponds to how often
+@@ -95,11 +95,11 @@ New file open requests (NFSv4) and new f
+ allowed until after this time has passed to allow clients to recover state.
+ .TP
+ .I nproc
+-specify the number of NFS server threads. By default, just one
+-thread is started. However, for optimum performance several threads
++specify the number of NFS server threads. By default, eight
++threads are started. However, for optimum performance several threads
+ should be used. The actual figure depends on the number of and the work
+ load created by the NFS clients, but a useful starting point is
+-8 threads. Effects of modifying that number can be checked using
++eight threads. Effects of modifying that number can be checked using
+ the
+ .BR nfsstat (8)
+ program.
+@@ -114,6 +114,58 @@ In particular
+ .B rpc.nfsd 0
+ will stop all threads and thus close any open connections.
+ 
++.SH CONFIGURATION FILE
++Many of the options that can be set on the command line can also be
++controlled through values set in the
++.B [nfsd]
++section of the
++.I /etc/nfs.conf
++configuration file.  Values recognized include:
++.TP
++.B threads
++The number of threads to start.
++.TP
++.B host
++A host name, or comma separated list of host names, that
++.I rpc.nfsd
++will listen on.  Use of the
++.B --host
++option replaces all host names listed here.
++.TP
++.B grace-time
++The grace time, for both NFSv4 and NLM, in seconds.
++.TP
++.B lease-time
++The lease time for NFSv4, in seconds.
++.TP
++.B port
++Set the port for TCP/UDP to bind to.
++.TP
++.B rdma
++Set RDMA port.  Use "rdma=nfsrdma" to enable standard port.
++.TP
++.B UDP
++Enable (with "on" or "yes" etc) or disable ("off", "no") UDP support.
++.TP
++.B TCP
++Enable or disable TCP support.
++.TP
++.B vers2
++.TP
++.B vers3
++.TP
++.B vers4
++Enable or disable a major NFS version.  3 and 4 are normally enabled
++by default.
++.TP
++.B vers4.1
++.TP
++.B vers4.2
++Setting these to "off" or similar will disable the selected minor
++versions.  Setting to "on" will enable them.  The default values
++are determined by the kernel, and usually minor versions default to
++being enabled once the implementation is sufficiently complete.
++
+ .SH NOTES
+ If the program is built with TI-RPC support, it will enable any protocol and
+ address family combinations that are marked visible in the
+@@ -124,6 +176,7 @@ database.
+ .BR rpc.mountd (8),
+ .BR exports (5),
+ .BR exportfs (8),
++.BR nfs.conf (5),
+ .BR rpc.rquotad (8),
+ .BR nfsstat (8),
+ .BR netconfig(5).
+diff -up nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig nfs-utils-1.3.0/utils/nfsd/nfssvc.c
+--- nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfssvc.c	2017-03-28 13:43:53.000000000 -0400
+@@ -23,6 +23,7 @@
+ 
+ #include "nfslib.h"
+ #include "xlog.h"
++#include "nfssvc.h"
+ 
+ #ifndef NFSD_FS_DIR
+ #define NFSD_FS_DIR	  "/proc/fs/nfsd"
+@@ -123,22 +124,6 @@ nfssvc_setfds(const struct addrinfo *hin
+ 	if (fd < 0)
+ 		return 0;
+ 
+-	switch(hints->ai_family) {
+-	case AF_INET:
+-		family = "inet";
+-		break;
+-#ifdef IPV6_SUPPORTED
+-	case AF_INET6:
+-		family = "inet6";
+-		break;
+-#endif /* IPV6_SUPPORTED */
+-	default:
+-		xlog(L_ERROR, "Unknown address family specified: %d\n",
+-				hints->ai_family);
+-		rc = EAFNOSUPPORT;
+-		goto error;
+-	}
+-
+ 	rc = getaddrinfo(node, port, hints, &addrhead);
+ 	if (rc == EAI_NONAME && !strcmp(port, "nfs")) {
+ 		snprintf(buf, sizeof(buf), "%d", NFS_PORT);
+@@ -146,10 +131,10 @@ nfssvc_setfds(const struct addrinfo *hin
+ 	}
+ 
+ 	if (rc != 0) {
+-		xlog(L_ERROR, "unable to resolve %s:%s to %s address: "
+-				"%s", node ? node : "ANYADDR", port, family,
+-				rc == EAI_SYSTEM ? strerror(errno) :
+-					gai_strerror(rc));
++		xlog(L_ERROR, "unable to resolve %s:%s: %s",
++			node ? node : "ANYADDR", port,
++			rc == EAI_SYSTEM ? strerror(errno) :
++				gai_strerror(rc));
+ 		goto error;
+ 	}
+ 
+@@ -168,6 +153,20 @@ nfssvc_setfds(const struct addrinfo *hin
+ 			continue;
+ 		}
+ 
++		switch(addr->ai_addr->sa_family) {
++		case AF_INET:
++			family = "AF_INET";
++			break;
++#ifdef IPV6_SUPPORTED
++		case AF_INET6:
++			family = "AF_INET6";
++			break;
++#endif /* IPV6_SUPPORTED */
++		default:
++			addr = addr->ai_next;
++			continue;
++		}
++
+ 		xlog(D_GENERAL, "Creating %s %s socket.", family, proto);
+ 
+ 		/* open socket and prepare to hand it off to kernel */
+@@ -251,12 +250,16 @@ error:
+ }
+ 
+ int
+-nfssvc_set_sockets(const int family, const unsigned int protobits,
++nfssvc_set_sockets(const unsigned int protobits,
+ 		   const char *host, const char *port)
+ {
+ 	struct addrinfo hints = { .ai_flags = AI_PASSIVE };
+ 
+-	hints.ai_family = family;
++#ifdef IPV6_SUPPORTED
++	hints.ai_family = AF_UNSPEC;
++#else  /* IPV6_SUPPORTED */
++	hints.ai_family = AF_INET;
++#endif /* IPV6_SUPPORTED */
+ 
+ 	if (!NFSCTL_ANYPROTO(protobits))
+ 		return EPROTOTYPE;
+diff -up nfs-utils-1.3.0/utils/nfsd/nfssvc.h.orig nfs-utils-1.3.0/utils/nfsd/nfssvc.h
+--- nfs-utils-1.3.0/utils/nfsd/nfssvc.h.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfssvc.h	2017-03-28 13:43:53.000000000 -0400
+@@ -22,7 +22,7 @@
+ 
+ void	nfssvc_mount_nfsdfs(char *progname);
+ int	nfssvc_inuse(void);
+-int	nfssvc_set_sockets(const int family, const unsigned int protobits,
++int	nfssvc_set_sockets(const unsigned int protobits,
+ 			   const char *host, const char *port);
+ void	nfssvc_set_time(const char *type, const int seconds);
+ int	nfssvc_set_rdmaport(const char *port);
+diff -up nfs-utils-1.3.0/utils/statd/sm-notify.c.orig nfs-utils-1.3.0/utils/statd/sm-notify.c
+--- nfs-utils-1.3.0/utils/statd/sm-notify.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/statd/sm-notify.c	2017-03-28 13:43:53.000000000 -0400
+@@ -29,6 +29,7 @@
+ #include <errno.h>
+ #include <grp.h>
+ 
++#include "conffile.h"
+ #include "sockaddr.h"
+ #include "xlog.h"
+ #include "nsm.h"
+@@ -64,6 +65,7 @@ static _Bool		opt_update_state = true;
+ static unsigned int	opt_max_retry = 15 * 60;
+ static char *		opt_srcaddr = NULL;
+ static char *		opt_srcport = NULL;
++char *			conf_path = NFS_CONFFILE;
+ 
+ static void		notify(const int sock);
+ static int		notify_host(int, struct nsm_host *);
+@@ -455,6 +457,7 @@ main(int argc, char **argv)
+ {
+ 	int	c, sock, force = 0;
+ 	char *	progname;
++	char *	s;
+ 
+ 	progname = strrchr(argv[0], '/');
+ 	if (progname != NULL)
+@@ -462,6 +465,15 @@ main(int argc, char **argv)
+ 	else
+ 		progname = argv[0];
+ 
++	conf_init();
++	xlog_from_conffile("sm-notify");
++	opt_max_retry = conf_get_num("sm-notify", "retry-time", opt_max_retry / 60) * 60;
++	opt_srcport = conf_get_str("sm-notify", "outgoing-port");
++	opt_srcaddr = conf_get_str("sm-notify", "outgoing-addr");
++	s = conf_get_str("statd", "state-directory-path");
++	if (s && !nsm_setup_pathnames(argv[0], s))
++		exit(1);
++
+ 	while ((c = getopt(argc, argv, "dm:np:v:P:f")) != -1) {
+ 		switch (c) {
+ 		case 'f':
+diff -up nfs-utils-1.3.0/utils/statd/sm-notify.man.orig nfs-utils-1.3.0/utils/statd/sm-notify.man
+--- nfs-utils-1.3.0/utils/statd/sm-notify.man.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/statd/sm-notify.man	2017-03-28 13:43:53.000000000 -0400
+@@ -219,6 +219,33 @@ argument when sending SM_NOTIFY requests
+ .IP
+ This option can be useful in multi-homed configurations where
+ the remote requires notification from a specific network address.
++.SH CONFIGURATION FILE
++Many of the options that can be set on the command line can also be
++controlled through values set in the
++.B [sm-notify]
++or, in one case, the
++.B [statd]
++section of the
++.I /etc/nfs.conf
++configuration file.
++
++Values recognized in the
++.B [sm-notify]
++section include:
++.BR retry-time ,
++.BR outgoing-port ", and"
++.BR outgoing-addr .
++These have the same effect as the command line options
++.BR m ,
++.BR p ", and"
++.B v
++respectively.
++
++The value recognized in the
++.B [statd]
++section is
++.BR state-directory-path .
++
+ .SH SECURITY
+ The
+ .B sm-notify
+diff -up nfs-utils-1.3.0/utils/statd/statd.c.orig nfs-utils-1.3.0/utils/statd/statd.c
+--- nfs-utils-1.3.0/utils/statd/statd.c.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/statd/statd.c	2017-03-28 13:43:53.000000000 -0400
+@@ -26,6 +26,7 @@
+ #include <sys/wait.h>
+ #include <grp.h>
+ 
++#include "conffile.h"
+ #include "statd.h"
+ #include "nfslib.h"
+ #include "nfsrpc.h"
+@@ -36,6 +37,7 @@
+ #include <sys/socket.h>
+ 
+ int	run_mode = 0;		/* foreground logging mode */
++char	*conf_path = NFS_CONFFILE;
+ 
+ /* LH - I had these local to main, but it seemed silly to have 
+  * two copies of each - one in main(), one static in log.c... 
+@@ -242,15 +244,21 @@ static void set_nlm_port(char *type, int
+ int main (int argc, char **argv)
+ {
+ 	extern char *optarg;
++	char *s;
+ 	int pid;
+ 	int arg;
+ 	int port = 0, out_port = 0;
+ 	int nlm_udp = 0, nlm_tcp = 0;
+ 	struct rlimit rlim;
++	char *env;
+ 
+ 	/* Default: daemon mode, no other options */
+ 	run_mode = 0;
+ 
++	env = getenv("RPC_STATD_NO_NOTIFY");
++	if (env && atoi(env) > 0)
++		run_mode |= MODE_NO_NOTIFY;
++
+ 	/* Log to stderr if there's an error during startup */
+ 	xlog_stderr(1);
+ 	xlog_syslog(0);
+@@ -265,6 +273,24 @@ int main (int argc, char **argv)
+ 	/* Set hostname */
+ 	MY_NAME = NULL;
+ 
++	conf_init();
++	xlog_from_conffile("statd");
++	out_port = conf_get_num("statd", "outgoing-port", out_port);
++	port = conf_get_num("statd", "port", port);
++	MY_NAME = conf_get_str("statd", "name");
++	if (MY_NAME)
++		run_mode |= STATIC_HOSTNAME;
++	s = conf_get_str("statd", "state-directory-path");
++	if (s && !nsm_setup_pathnames(argv[0], s))
++		exit(1);
++	s = conf_get_str("statd", "ha-callout");
++	if (s)
++		ha_callout_prog = s;
++
++	nlm_tcp = conf_get_num("lockd", "port", nlm_tcp);
++	/* udp defaults to the same as tcp ! */
++	nlm_udp = conf_get_num("lockd", "udp-port", nlm_tcp);
++
+ 	/* Process command line switches */
+ 	while ((arg = getopt_long(argc, argv, "h?vVFNH:dn:p:o:P:LT:U:", longopts, NULL)) != EOF) {
+ 		switch (arg) {
+diff -up nfs-utils-1.3.0/utils/statd/statd.man.orig nfs-utils-1.3.0/utils/statd/statd.man
+--- nfs-utils-1.3.0/utils/statd/statd.man.orig	2017-03-28 13:43:36.000000000 -0400
++++ nfs-utils-1.3.0/utils/statd/statd.man	2017-03-28 13:43:53.000000000 -0400
+@@ -8,7 +8,7 @@
+ .\" Rewritten by Chuck Lever <chuck.lever@oracle.com>, 2009.
+ .\" Copyright 2009 Oracle.  All rights reserved.
+ .\"
+-.TH RPC.STATD 8 "1 November 2009
++.TH RPC.STATD 8 "1 November 2009"
+ .SH NAME
+ rpc.statd \- NSM service daemon
+ .SH SYNOPSIS
+@@ -247,7 +247,7 @@ should listen on for
+ .B NLM
+ requests.
+ .TP
+-.BI "\-P, " "" \-\-state\-directory\-path " pathname
++.BI "\-P, " "" \-\-state\-directory\-path " pathname"
+ Specifies the pathname of the parent directory
+ where NSM state information resides.
+ If this option is not specified,
+@@ -267,6 +267,37 @@ Causes
+ to display version information on
+ .I stderr
+ and then exit.
++.SH CONFIGURATION FILE
++Many of the options that can be set on the command line can also be
++controlled through values set in the
++.B [statd]
++or, in some cases, the
++.B [lockd]
++sections of the
++.I /etc/nfs.conf
++configuration file.
++Values recognized in the
++.B [statd]
++section include
++.BR port ,
++.BR outgoing-port ,
++.BR name ,
++.BR state-directory-path ", and"
++.B ha-callout
++which each have the same effect as the option with the same name.
++
++The values recognized in the
++.B [lockd]
++section include
++.B port
++and
++.B udp-port
++which have the same effect as the
++.B --nlm-port
++and
++.B --nlm-udp-port
++options, respectively.
++
+ .SH SECURITY
+ The
+ .B rpc.statd
+@@ -387,6 +418,11 @@ it attempts to start listeners on networ
+ As long as at least one network transport listener starts successfully,
+ .B rpc.statd
+ will operate.
++.SH ENVIRONMENT
++.TP
++.B RPC_STATD_NO_NOTIFY=
++If set to a positive integer, has the same effect as
++.IR \-\-no\-notify .
+ .SH FILES
+ .TP 2.5i
+ .I /var/lib/nfs/sm

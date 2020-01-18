@@ -1,0 +1,398 @@
+diff -up nfs-utils-1.3.0/utils/gssd/gssd_proc.c.orig nfs-utils-1.3.0/utils/gssd/gssd_proc.c
+--- nfs-utils-1.3.0/utils/gssd/gssd_proc.c.orig	2014-09-17 14:22:54.003055871 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd_proc.c	2014-09-17 14:36:02.917808209 -0400
+@@ -77,6 +77,7 @@
+ #include "context.h"
+ #include "nfsrpc.h"
+ #include "nfslib.h"
++#include "gss_names.h"
+ 
+ /*
+  * pollarray:
+@@ -681,19 +682,25 @@ parse_enctypes(char *enctypes)
+ 	return 0;
+ }
+ 
+-static int
++static void
+ do_downcall(int k5_fd, uid_t uid, struct authgss_private_data *pd,
+-	    gss_buffer_desc *context_token, OM_uint32 lifetime_rec)
++	    gss_buffer_desc *context_token, OM_uint32 lifetime_rec,
++	    gss_buffer_desc *acceptor)
+ {
+ 	char    *buf = NULL, *p = NULL, *end = NULL;
+ 	unsigned int timeout = context_timeout;
+ 	unsigned int buf_size = 0;
+ 
+-	printerr(1, "doing downcall lifetime_rec %u\n", lifetime_rec);
++	printerr(1, "doing downcall: lifetime_rec=%u acceptor=%.*s\n",
++		lifetime_rec, acceptor->length, acceptor->value);
+ 	buf_size = sizeof(uid) + sizeof(timeout) + sizeof(pd->pd_seq_win) +
+ 		sizeof(pd->pd_ctx_hndl.length) + pd->pd_ctx_hndl.length +
+-		sizeof(context_token->length) + context_token->length;
++		sizeof(context_token->length) + context_token->length +
++		sizeof(acceptor->length) + acceptor->length;
+ 	p = buf = malloc(buf_size);
++	if (!buf)
++		goto out_err;
++
+ 	end = buf + buf_size;
+ 
+ 	/* context_timeout set by -t option overrides context lifetime */
+@@ -704,14 +711,15 @@ do_downcall(int k5_fd, uid_t uid, struct
+ 	if (WRITE_BYTES(&p, end, pd->pd_seq_win)) goto out_err;
+ 	if (write_buffer(&p, end, &pd->pd_ctx_hndl)) goto out_err;
+ 	if (write_buffer(&p, end, context_token)) goto out_err;
++	if (write_buffer(&p, end, acceptor)) goto out_err;
+ 
+ 	if (write(k5_fd, buf, p - buf) < p - buf) goto out_err;
+-	if (buf) free(buf);
+-	return 0;
++	free(buf);
++	return;
+ out_err:
+-	if (buf) free(buf);
++	free(buf);
+ 	printerr(1, "Failed to write downcall!\n");
+-	return -1;
++	return;
+ }
+ 
+ static int
+@@ -1035,6 +1043,9 @@ process_krb5_upcall(struct clnt_info *cl
+ 	gss_cred_id_t		gss_cred;
+ 	OM_uint32		maj_stat, min_stat, lifetime_rec;
+ 	pid_t			pid;
++	gss_name_t		gacceptor = GSS_C_NO_NAME;
++	gss_OID			mech;
++	gss_buffer_desc		acceptor  = {0};
+ 
+ 	pid = fork();
+ 	switch(pid) {
+@@ -1175,15 +1186,24 @@ process_krb5_upcall(struct clnt_info *cl
+ 		goto out_return_error;
+ 	}
+ 
+-	/* Grab the context lifetime to pass to the kernel. lifetime_rec
+-	 * is set to zero on error */
+-	maj_stat = gss_inquire_context(&min_stat, pd.pd_ctx, NULL, NULL,
+-				       &lifetime_rec, NULL, NULL, NULL, NULL);
+-
+-	if (maj_stat)
+-		printerr(1, "WARNING: Failed to inquire context for lifetme "
+-			    "maj_stat %u\n", maj_stat);
++	/* Grab the context lifetime and acceptor name out of the ctx. */
++	maj_stat = gss_inquire_context(&min_stat, pd.pd_ctx, NULL, &gacceptor,
++				       &lifetime_rec, &mech, NULL, NULL, NULL);
++
++	if (maj_stat != GSS_S_COMPLETE) {
++		printerr(1, "WARNING: Failed to inquire context "
++			    "maj_stat (0x%x)\n", maj_stat);
++		lifetime_rec = 0;
++	} else {
++		get_hostbased_client_buffer(gacceptor, mech, &acceptor);
++		gss_release_name(&min_stat, &gacceptor);
++	}
+ 
++	/*
++	 * The serialization can mean turning pd.pd_ctx into a lucid context. If
++	 * that happens then the pd.pd_ctx will be unusable, so we must never
++	 * try to use it after this point.
++	 */
+ 	if (serialize_context_for_kernel(&pd.pd_ctx, &token, &krb5oid, NULL)) {
+ 		printerr(0, "WARNING: Failed to serialize krb5 context for "
+ 			    "user with uid %d for server %s\n",
+@@ -1191,9 +1211,10 @@ process_krb5_upcall(struct clnt_info *cl
+ 		goto out_return_error;
+ 	}
+ 
+-	do_downcall(fd, uid, &pd, &token, lifetime_rec);
++	do_downcall(fd, uid, &pd, &token, lifetime_rec, &acceptor);
+ 
+ out:
++	gss_release_buffer(&min_stat, &acceptor);
+ 	if (token.value)
+ 		free(token.value);
+ #ifdef HAVE_AUTHGSS_FREE_PRIVATE_DATA
+diff -up nfs-utils-1.3.0/utils/gssd/gss_names.c.orig nfs-utils-1.3.0/utils/gssd/gss_names.c
+--- nfs-utils-1.3.0/utils/gssd/gss_names.c.orig	2014-09-17 14:35:16.646945303 -0400
++++ nfs-utils-1.3.0/utils/gssd/gss_names.c	2014-09-17 14:35:16.646945303 -0400
+@@ -0,0 +1,138 @@
++/*
++  Copyright (c) 2000 The Regents of the University of Michigan.
++  All rights reserved.
++
++  Copyright (c) 2002 Bruce Fields <bfields@UMICH.EDU>
++
++  Redistribution and use in source and binary forms, with or without
++  modification, are permitted provided that the following conditions
++  are met:
++
++  1. Redistributions of source code must retain the above copyright
++     notice, this list of conditions and the following disclaimer.
++  2. Redistributions in binary form must reproduce the above copyright
++     notice, this list of conditions and the following disclaimer in the
++     documentation and/or other materials provided with the distribution.
++  3. Neither the name of the University nor the names of its
++     contributors may be used to endorse or promote products derived
++     from this software without specific prior written permission.
++
++  THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
++  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++  DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
++  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*/
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif	/* HAVE_CONFIG_H */
++
++#include <sys/param.h>
++#include <sys/stat.h>
++#include <rpc/rpc.h>
++
++#include <pwd.h>
++#include <stdio.h>
++#include <unistd.h>
++#include <ctype.h>
++#include <string.h>
++#include <fcntl.h>
++#include <errno.h>
++#include <nfsidmap.h>
++#include <nfslib.h>
++#include <time.h>
++
++#include "svcgssd.h"
++#include "gss_util.h"
++#include "err_util.h"
++#include "context.h"
++#include "misc.h"
++#include "gss_oids.h"
++#include "svcgssd_krb5.h"
++
++static int
++get_krb5_hostbased_name(gss_buffer_desc *name, char **hostbased_name)
++{
++	char *p, *sname = NULL;
++	if (strchr(name->value, '@') && strchr(name->value, '/')) {
++		if ((sname = calloc(name->length, 1)) == NULL) {
++			printerr(0, "ERROR: get_krb5_hostbased_name failed "
++				 "to allocate %d bytes\n", name->length);
++			return -1;
++		}
++		/* read in name and instance and replace '/' with '@' */
++		sscanf(name->value, "%[^@]", sname);
++		p = strrchr(sname, '/');
++		if (p == NULL) {    /* The '@' preceeded the '/' */
++			free(sname);
++			return -1;
++		}
++		*p = '@';
++	}
++	*hostbased_name = sname;
++	return 0;
++}
++
++int
++get_hostbased_client_name(gss_name_t client_name, gss_OID mech,
++			  char **hostbased_name)
++{
++	u_int32_t	maj_stat, min_stat;
++	gss_buffer_desc	name;
++	gss_OID		name_type = GSS_C_NO_OID;
++	char		*cname;
++	int		res = -1;
++
++	*hostbased_name = NULL;	    /* preset in case we fail */
++
++	/* Get the client's gss authenticated name */
++	maj_stat = gss_display_name(&min_stat, client_name, &name, &name_type);
++	if (maj_stat != GSS_S_COMPLETE) {
++		pgsserr("get_hostbased_client_name: gss_display_name",
++			maj_stat, min_stat, mech);
++		goto out_err;
++	}
++	if (name.length >= 0xffff) {	    /* don't overflow */
++		printerr(0, "ERROR: get_hostbased_client_name: "
++			 "received gss_name is too long (%d bytes)\n",
++			 name.length);
++		goto out_rel_buf;
++	}
++
++	/* For Kerberos, transform the NT_KRB5_PRINCIPAL name to
++	 * an NT_HOSTBASED_SERVICE name */
++	if (g_OID_equal(&krb5oid, mech)) {
++		if (get_krb5_hostbased_name(&name, &cname) == 0)
++			*hostbased_name = cname;
++	} else {
++		printerr(1, "WARNING: unknown/unsupport mech OID\n");
++	}
++
++	res = 0;
++out_rel_buf:
++	gss_release_buffer(&min_stat, &name);
++out_err:
++	return res;
++}
++
++void
++get_hostbased_client_buffer(gss_name_t client_name, gss_OID mech,
++			    gss_buffer_t buf)
++{
++	char *hname;
++
++	if (!get_hostbased_client_name(client_name, mech, &hname)) {
++		buf->length = strlen(hname) + 1;
++		buf->value = hname;
++	} else {
++		buf->length = 0;
++		buf->value = NULL;
++	}
++}
+diff -up nfs-utils-1.3.0/utils/gssd/gss_names.h.orig nfs-utils-1.3.0/utils/gssd/gss_names.h
+--- nfs-utils-1.3.0/utils/gssd/gss_names.h.orig	2014-09-17 14:35:16.646945303 -0400
++++ nfs-utils-1.3.0/utils/gssd/gss_names.h	2014-09-17 14:35:16.646945303 -0400
+@@ -0,0 +1,36 @@
++/*
++  Copyright (c) 2000 The Regents of the University of Michigan.
++  All rights reserved.
++
++  Copyright (c) 2002 Bruce Fields <bfields@UMICH.EDU>
++
++  Redistribution and use in source and binary forms, with or without
++  modification, are permitted provided that the following conditions
++  are met:
++
++  1. Redistributions of source code must retain the above copyright
++     notice, this list of conditions and the following disclaimer.
++  2. Redistributions in binary form must reproduce the above copyright
++     notice, this list of conditions and the following disclaimer in the
++     documentation and/or other materials provided with the distribution.
++  3. Neither the name of the University nor the names of its
++     contributors may be used to endorse or promote products derived
++     from this software without specific prior written permission.
++
++  THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
++  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++  DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
++  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++  LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++  NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++*/
++
++extern int get_hostbased_client_name(gss_name_t client_name, gss_OID mech,
++					char **hostbased_name);
++extern void get_hostbased_client_buffer(gss_name_t client_name,
++			gss_OID mech, gss_buffer_t buf);
+diff -up nfs-utils-1.3.0/utils/gssd/Makefile.am.orig nfs-utils-1.3.0/utils/gssd/Makefile.am
+--- nfs-utils-1.3.0/utils/gssd/Makefile.am.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/Makefile.am	2014-09-17 14:35:16.645945284 -0400
+@@ -18,11 +18,13 @@ COMMON_SRCS = \
+ 	context_lucid.c \
+ 	gss_util.c \
+ 	gss_oids.c \
++	gss_names.c \
+ 	err_util.c \
+ 	\
+ 	context.h \
+ 	err_util.h \
+ 	gss_oids.h \
++	gss_names.h \
+ 	gss_util.h
+ 
+ gssd_SOURCES = \
+diff -up nfs-utils-1.3.0/utils/gssd/svcgssd_proc.c.orig nfs-utils-1.3.0/utils/gssd/svcgssd_proc.c
+--- nfs-utils-1.3.0/utils/gssd/svcgssd_proc.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/svcgssd_proc.c	2014-09-17 14:35:16.646945303 -0400
+@@ -59,6 +59,7 @@
+ #include "misc.h"
+ #include "gss_oids.h"
+ #include "svcgssd_krb5.h"
++#include "gss_names.h"
+ 
+ extern char * mech2file(gss_OID mech);
+ #define SVCGSSD_CONTEXT_CHANNEL "/proc/net/rpc/auth.rpcsec.context/channel"
+@@ -315,71 +316,6 @@ print_hexl(const char *description, unsi
+ }
+ #endif
+ 
+-static int
+-get_krb5_hostbased_name (gss_buffer_desc *name, char **hostbased_name)
+-{
+-	char *p, *sname = NULL;
+-	if (strchr(name->value, '@') && strchr(name->value, '/')) {
+-		if ((sname = calloc(name->length, 1)) == NULL) {
+-			printerr(0, "ERROR: get_krb5_hostbased_name failed "
+-				 "to allocate %d bytes\n", name->length);
+-			return -1;
+-		}
+-		/* read in name and instance and replace '/' with '@' */
+-		sscanf(name->value, "%[^@]", sname);
+-		p = strrchr(sname, '/');
+-		if (p == NULL) {    /* The '@' preceeded the '/' */
+-			free(sname);
+-			return -1;
+-		}
+-		*p = '@';
+-	}
+-	*hostbased_name = sname;
+-	return 0;
+-}
+-
+-static int
+-get_hostbased_client_name(gss_name_t client_name, gss_OID mech,
+-			  char **hostbased_name)
+-{
+-	u_int32_t	maj_stat, min_stat;
+-	gss_buffer_desc	name;
+-	gss_OID		name_type = GSS_C_NO_OID;
+-	char		*cname;
+-	int		res = -1;
+-
+-	*hostbased_name = NULL;	    /* preset in case we fail */
+-
+-	/* Get the client's gss authenticated name */
+-	maj_stat = gss_display_name(&min_stat, client_name, &name, &name_type);
+-	if (maj_stat != GSS_S_COMPLETE) {
+-		pgsserr("get_hostbased_client_name: gss_display_name",
+-			maj_stat, min_stat, mech);
+-		goto out_err;
+-	}
+-	if (name.length >= 0xffff) {	    /* don't overflow */
+-		printerr(0, "ERROR: get_hostbased_client_name: "
+-			 "received gss_name is too long (%d bytes)\n",
+-			 name.length);
+-		goto out_rel_buf;
+-	}
+-
+-	/* For Kerberos, transform the NT_KRB5_PRINCIPAL name to
+-	 * an NT_HOSTBASED_SERVICE name */
+-	if (g_OID_equal(&krb5oid, mech)) {
+-		if (get_krb5_hostbased_name(&name, &cname) == 0)
+-			*hostbased_name = cname;
+-	} else {
+-		printerr(1, "WARNING: unknown/unsupport mech OID\n");
+-	}
+-
+-	res = 0;
+-out_rel_buf:
+-	gss_release_buffer(&min_stat, &name);
+-out_err:
+-	return res;
+-}
+-
+ void
+ handle_nullreq(FILE *f) {
+ 	/* XXX initialize to a random integer to reduce chances of unnecessary

@@ -1,0 +1,97 @@
+diff --git a/utils/idmapd/idmapd.c b/utils/idmapd/idmapd.c
+index aff89d1..f55d2e1 100644
+--- a/utils/idmapd/idmapd.c
++++ b/utils/idmapd/idmapd.c
+@@ -199,6 +199,12 @@ flush_nfsd_idmap_cache(void)
+ 	return ret;
+ }
+ 
++void usage(char *progname)
++{
++	fprintf(stderr, "Usage: %s [-hfvCS] [-p path] [-c path]\n",
++		basename(progname));
++}
++
+ int
+ main(int argc, char **argv)
+ {
+@@ -225,16 +231,18 @@ main(int argc, char **argv)
+ 		progname = argv[0];
+ 	xlog_open(progname);
+ 
+-#define GETOPTSTR "vfd:p:U:G:c:CS"
++#define GETOPTSTR "hvfd:p:U:G:c:CS"
+ 	opterr=0; /* Turn off error messages */
+ 	while ((opt = getopt(argc, argv, GETOPTSTR)) != -1) {
+ 		if (opt == 'c')
+ 			conf_path = optarg;
+ 		if (opt == '?') {
+ 			if (strchr(GETOPTSTR, optopt))
+-				errx(1, "'-%c' option requires an argument.", optopt);
++				warnx("'-%c' option requires an argument.", optopt);
+ 			else
+-				errx(1, "'-%c' is an invalid argument.", optopt);
++				warnx("'-%c' is an invalid argument.", optopt);
++			usage(progname);
++			exit(1);
+ 		}
+ 	}
+ 	optind = 1;
+@@ -276,6 +284,9 @@ main(int argc, char **argv)
+ 		case 'S':
+ 			clientstart = 0;
+ 			break;
++		case 'h':
++			usage(progname);
++			exit(0);
+ 		default:
+ 			break;
+ 		}
+diff --git a/utils/idmapd/idmapd.man b/utils/idmapd/idmapd.man
+index 185cd1b..b9200c7 100644
+--- a/utils/idmapd/idmapd.man
++++ b/utils/idmapd/idmapd.man
+@@ -10,8 +10,11 @@
+ .Sh SYNOPSIS
+ .\" For a program:  program [-abc] file ...
+ .Nm rpc.idmapd
+-.Op Fl v
++.Op Fl h
+ .Op Fl f
++.Op Fl v
++.Op Fl C
++.Op Fl S
+ .Op Fl p Ar path
+ .Op Fl c Ar path
+ .Sh DESCRIPTION
+@@ -20,8 +23,20 @@ is the NFSv4 ID <-> name mapping daemon.  It provides functionality to
+ the NFSv4 kernel client and server, to which it communicates via
+ upcalls, by translating user and group IDs to names, and vice versa.
+ .Pp
++Note that on more recent kernels only the NFSv4 server uses
++.Nm .
++The NFSv4 client instead uses
++.Xr nfsidmap 8 ,
++and only falls back to 
++.Nm 
++if there was a problem running the
++.Xr nfsidmap 8
++program.
++.Pp
+ The options are as follows:
+ .Bl -tag -width Ds_imagedir
++.It Fl h
++Display usage message.
+ .It Fl v
+ Increases the verbosity level (can be specified multiple times).
+ .It Fl f
+@@ -58,7 +73,8 @@ messages to console, and with a verbosity level of 3.
+ .Sh FILES
+ .Pa /etc/idmapd.conf
+ .Sh SEE ALSO
+-.Xr idmapd.conf 5
++.Xr idmapd.conf 5 ,
++.Xr nfsidmap 8
+ .\".Sh SEE ALSO
+ .\".Xr nylon.conf 4
+ .\" .Sh COMPATIBILITY

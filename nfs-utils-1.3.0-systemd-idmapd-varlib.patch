@@ -1,0 +1,25 @@
+commit 6efdb0440daf3ed304a3c1115f01e76e89d792a7
+Author: Chris Mayo <aklhfex@gmail.com>
+Date:   Fri Jan 23 10:35:32 2015 -0500
+
+    systemd: Ensure RPC pipefs is mounted before rpc.idmapd starts
+    
+    rpc.idmapd aborts on start-up if RPC pipefs is not present.
+    
+    Needed if GSS services are not used.
+    
+    Signed-off-by: Chris Mayo <aklhfex@gmail.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/systemd/nfs-idmapd.service b/systemd/nfs-idmapd.service
+index 726038d..e84f8c8 100644
+--- a/systemd/nfs-idmapd.service
++++ b/systemd/nfs-idmapd.service
+@@ -1,5 +1,7 @@
+ [Unit]
+ Description=NFSv4 ID-name mapping service
++Requires=var-lib-nfs-rpc_pipefs.mount
++After=var-lib-nfs-rpc_pipefs.mount
+ 
+ BindsTo=nfs-server.service
+ 

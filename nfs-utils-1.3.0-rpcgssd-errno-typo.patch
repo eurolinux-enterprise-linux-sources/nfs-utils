@@ -1,0 +1,21 @@
+commit 404c79c81df0548d50216cddc7d2c4ebfca45c45
+Author: Steve Dickson <steved@redhat.com>
+Date:   Fri Jul 25 10:48:16 2014 -0400
+
+    gssd: Fixed errno typo in get_servername()
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/gssd/gssd_proc.c b/utils/gssd/gssd_proc.c
+index 40ff188..9925dab 100644
+--- a/utils/gssd/gssd_proc.c
++++ b/utils/gssd/gssd_proc.c
+@@ -218,7 +218,7 @@ get_servername(const char *name, const struct sockaddr *sa, const char *addr)
+ 			  NI_NAMEREQD);
+ 	if (err) {
+ 		printerr(0, "ERROR: unable to resolve %s to hostname: %s\n",
+-			 addr, err == EAI_SYSTEM ? strerror(err) :
++			 addr, err == EAI_SYSTEM ? strerror(errno) :
+ 						   gai_strerror(err));
+ 		return NULL;
+ 	}

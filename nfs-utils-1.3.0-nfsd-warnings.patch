@@ -1,0 +1,26 @@
+commit a2e431fdd114f2c2466573471dafef9024392f2d
+Author: Steve Dickson <steved@redhat.com>
+Date:   Wed Apr 30 12:26:06 2014 -0400
+
+    nfsd: Remove some warnings nfsd.c
+    
+    nfsd.c:347:15: warning: comparison between signed and unsigned integer
+    expressions [-Wsign-compare]
+    nfsd.c:385:13: warning: comparison between signed and unsigned integer
+    expressions [-Wsign-compare]
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/nfsd/nfsd.c b/utils/nfsd/nfsd.c
+index 73d6a92..03e3c81 100644
+--- a/utils/nfsd/nfsd.c
++++ b/utils/nfsd/nfsd.c
+@@ -101,7 +101,7 @@ main(int argc, char **argv)
+ 	int	count = NFSD_NPROC, c, i, error = 0, portnum = 0, fd, found_one;
+ 	char *p, *progname, *port, *rdma_port = NULL;
+ 	char **haddr = NULL;
+-	unsigned int hcounter = 0;
++	int hcounter = 0;
+ 	int	socket_up = 0;
+ 	unsigned int minorvers = 0;
+ 	unsigned int minorversset = 0;

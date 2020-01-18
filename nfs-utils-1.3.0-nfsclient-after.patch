@@ -1,0 +1,12 @@
+diff -up rhel7/systemd/nfs-client.target.orig rhel7/systemd/nfs-client.target
+--- rhel7/systemd/nfs-client.target.orig	2014-03-25 11:12:07.000000000 -0400
++++ rhel7/systemd/nfs-client.target	2014-09-29 11:16:15.470237681 -0400
+@@ -7,7 +7,7 @@ Wants=remote-fs-pre.target
+ # start that on demand if needed.
+ Wants=rpc-gssd.service rpc-svcgssd.service
+ Wants=nfs-blkmap.service rpc-statd-notify.service
+-Before=rpc-gssd.service rpc-svcgssd.service nfs-blkmap.service
++After=rpc-gssd.service rpc-svcgssd.service nfs-blkmap.service
+ 
+ [Install]
+ WantedBy=multi-user.target

@@ -1,0 +1,55 @@
+diff -up nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c.orig nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c
+--- nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c.orig	2016-06-08 09:59:09.920690710 -0400
++++ nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c	2016-06-08 11:22:01.104971559 -0400
+@@ -16,7 +16,7 @@
+ #include "conffile.h"
+ 
+ int verbose = 0;
+-char *usage = "Usage: %s [-v] [-c || [-u|-g|-r key] || -d || -l || [-t timeout] key desc]";
++char *usage = "Usage: %s [-vh] [-c || [-u|-g|-r key] || -d || -l || [-t timeout] key desc]";
+ 
+ #define MAX_ID_LEN   11
+ #define IDMAP_NAMESZ 128
+@@ -355,7 +355,7 @@ int main(int argc, char **argv)
+ 
+ 	xlog_open(progname);
+ 
+-	while ((opt = getopt(argc, argv, "du:g:r:ct:vl")) != -1) {
++	while ((opt = getopt(argc, argv, "hdu:g:r:ct:vl")) != -1) {
+ 		switch (opt) {
+ 		case 'd':
+ 			display++;
+@@ -384,9 +384,10 @@ int main(int argc, char **argv)
+ 		case 't':
+ 			timeout = atoi(optarg);
+ 			break;
++		case 'h':
+ 		default:
+ 			xlog_warn(usage, progname);
+-			break;
++			exit(opt == 'h' ? 0 : 1);
+ 		}
+ 	}
+ 
+diff -up nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.man.orig nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.man
+--- nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.man.orig	2016-06-08 09:59:09.899690366 -0400
++++ nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.man	2016-06-08 11:22:01.104971559 -0400
+@@ -15,6 +15,8 @@ nfsidmap \- The NFS idmapper upcall prog
+ .B "nfsidmap -d"
+ .br
+ .B "nfsidmap -l"
++.br
++.B "nfsidmap -h"
+ .SH DESCRIPTION
+ The NFSv4 protocol represents the local system's UID and GID values
+ on the wire as strings of the form
+@@ -71,6 +73,9 @@ Display the system's effective NFSv4 dom
+ .B -g user
+ Revoke the gid key of the given user.
+ .TP
++.B -h
++Display usage message.
++.TP
+ .B -l
+ Display on
+ .I stdout

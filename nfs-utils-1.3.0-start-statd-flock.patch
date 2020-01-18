@@ -1,0 +1,27 @@
+commit 8fef90084f3d19e90ba1bb22b8cd1d58ddaf6ef3
+Author: Steve Dickson <steved@redhat.com>
+Date:   Tue Jun 21 12:06:06 2016 -0400
+
+    start-statd: Use flock to serialize the running of this script
+    
+    To once and for all stop multiple rpc.statd from
+    being started (mostly in HA environments), use
+    flock to serialize the running of the script
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/statd/start-statd b/utils/statd/start-statd
+index 19e6eb2..2fd6039 100755
+--- a/utils/statd/start-statd
++++ b/utils/statd/start-statd
+@@ -6,6 +6,10 @@
+ # site.
+ PATH="/sbin:/usr/sbin:/bin:/usr/bin"
+ 
++# Use flock to serialize the running of this script
++exec 200> /var/run/rpc.statd.lock
++flock -e 200
++
+ if [ -s /var/run/rpc.statd.pid ] &&
+        [ 1`cat /var/run/rpc.statd.pid` -gt 1 ] &&
+        kill -0 `cat /var/run/rpc.statd.pid` > /dev/null 2>&1

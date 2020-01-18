@@ -1,0 +1,46 @@
+commit d89e3fc7d3b14dea481bd9af0bca996ced689bf6
+Author: Natanael Copa <ncopa@alpinelinux.org>
+Date:   Fri Sep 12 13:19:01 2014 -0400
+
+    exportfs: fix test of NULL pointer in host_pton()
+    
+    This fixes the problem reported in:
+        https://bugzilla.redhat.com/show_bug.cgi?id=1083018
+    
+    Signed-off-by: Natanael Copa <ncopa@alpinelinux.org>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/support/export/hostname.c b/support/export/hostname.c
+index ad595d1..d9153e1 100644
+--- a/support/export/hostname.c
++++ b/support/export/hostname.c
+@@ -115,6 +115,11 @@ host_pton(const char *paddr)
+ 	 * have a real AF_INET presentation address, before invoking
+ 	 * getaddrinfo(3) to generate the full addrinfo list.
+ 	 */
++	if (paddr == NULL) {
++		xlog(D_GENERAL, "%s: passed a NULL presentation address",
++			__func__);
++		return NULL;
++	}
+ 	inet4 = 1;
+ 	if (inet_pton(AF_INET, paddr, &sin.sin_addr) == 0)
+ 		inet4 = 0;
+@@ -123,15 +128,12 @@ host_pton(const char *paddr)
+ 	switch (error) {
+ 	case 0:
+ 		if (!inet4 && ai->ai_addr->sa_family == AF_INET) {
++			xlog(D_GENERAL, "%s: failed to convert %s",
++					__func__, paddr);
+ 			freeaddrinfo(ai);
+ 			break;
+ 		}
+ 		return ai;
+-	case EAI_NONAME:
+-		if (paddr == NULL)
+-			xlog(D_GENERAL, "%s: passed a NULL presentation address",
+-				__func__);
+-		break;
+ 	case EAI_SYSTEM:
+ 		xlog(D_GENERAL, "%s: failed to convert %s: (%d) %m",
+ 				__func__, paddr, errno);

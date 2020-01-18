@@ -1,0 +1,41 @@
+commit c7896bec9699473959fc51baf3686149a470a30b
+Author: Chris Siebenmann <cks.nfs01@cs.toronto.edu>
+Date:   Tue Mar 14 10:41:39 2017 -0400
+
+    Manual page bug: two inaccuracies in nfsd(7)
+    
+    Here is a patch that deletes the mention of auth.domain and changes the
+    wording around 'flush' files. I'm not attached to the revised wording;
+    it's just the best I could manage in something that felt that it was
+    within the same style and space as the current wording.
+    
+    Acked-by: NeilBrown <neilb@suse.com>
+    Signed-off-by: Chris Siebenmann <cks.nfs01@cs.toronto.edu>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/exportfs/nfsd.man b/utils/exportfs/nfsd.man
+index 0c516fa..9efa29f 100644
+--- a/utils/exportfs/nfsd.man
++++ b/utils/exportfs/nfsd.man
+@@ -105,11 +105,6 @@ clients have for different filesystems.
+ The caches are:
+ 
+ .TP
+-.B auth.domain
+-This cache maps the name of a client (or domain) to an internal data
+-structure.  The only access that is possible is to flush the cache.
+-
+-.TP
+ .B auth.unix.ip
+ This cache contains a mapping from IP address to the name of the
+ authentication domain that the ipaddress should be treated as part of.
+@@ -133,7 +128,8 @@ are:
+ .B flush
+ When a number of seconds since epoch (1 Jan 1970) is written to this
+ file, all entries in the cache that were last updated before that file
+-become invalidated and will be flushed out.  Writing 1 will flush
++become invalidated and will be flushed out.  Writing a time in the
++future (in seconds since epoch) will flush
+ everything.  This is the only file that will always be present.
+ 
+ .TP

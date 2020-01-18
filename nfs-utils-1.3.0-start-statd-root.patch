@@ -1,0 +1,35 @@
+diff --git a/utils/mount/network.c b/utils/mount/network.c
+index 4f8c15c..515249b 100644
+--- a/utils/mount/network.c
++++ b/utils/mount/network.c
+@@ -796,6 +796,8 @@ int start_statd(void)
+ 	if (stat(START_STATD, &stb) == 0) {
+ 		if (S_ISREG(stb.st_mode) && (stb.st_mode & S_IXUSR)) {
+ 			int cnt = STATD_TIMEOUT * 10;
++			int status = 0;
++			char * const envp[1] = { NULL };
+ 			const struct timespec ts = {
+ 				.tv_sec = 0,
+ 				.tv_nsec = 100000000,
+@@ -803,14 +805,19 @@ int start_statd(void)
+ 			pid_t pid = fork();
+ 			switch (pid) {
+ 			case 0: /* child */
+-				execl(START_STATD, START_STATD, NULL);
++				setgid(0);
++				setuid(0);
++				execle(START_STATD, START_STATD, NULL, envp);
+ 				exit(1);
+ 			case -1: /* error */
+ 				nfs_error(_("%s: fork failed: %s"),
+ 						progname, strerror(errno));
+ 				break;
+ 			default: /* parent */
+-				waitpid(pid, NULL,0);
++				if (waitpid(pid, &status,0) == pid &&
++				    status == 0)
++					/* assume it worked */
++					return 1;
+ 				break;
+ 			}
+ 			while (1) {

@@ -1,0 +1,45 @@
+diff -up nfs-utils-1.3.0/utils/mount/stropts.c.orig nfs-utils-1.3.0/utils/mount/stropts.c
+--- nfs-utils-1.3.0/utils/mount/stropts.c.orig	2016-12-18 10:59:32.526389233 -0500
++++ nfs-utils-1.3.0/utils/mount/stropts.c	2016-12-18 11:02:17.564900647 -0500
+@@ -108,12 +108,6 @@ static void nfs_default_version(struct n
+ 		return;
+ 	}
+ 
+-	if (mi->version.v_mode == V_GENERAL &&
+-		config_default_vers.v_mode == V_DEFAULT) {
+-		mi->version.v_mode = V_SPECIFIC;
+-		return;
+-	}
+-
+ 	if (mi->version.v_mode == V_DEFAULT &&
+ 		config_default_vers.v_mode != V_DEFAULT) {
+ 		mi->version.major = config_default_vers.major;
+@@ -121,9 +115,9 @@ static void nfs_default_version(struct n
+ 		return;
+ 	}
+ 
+-	if (mi->version.v_mode == V_GENERAL &&
+-		config_default_vers.v_mode != V_DEFAULT) {
+-		if (mi->version.major == config_default_vers.major)
++	if (mi->version.v_mode == V_GENERAL) {
++		if (config_default_vers.v_mode != V_DEFAULT &&
++		    mi->version.major == config_default_vers.major)
+ 			mi->version.minor = config_default_vers.minor;
+ 		return;
+ 	}
+@@ -751,8 +745,13 @@ static int nfs_do_mount_v4(struct nfsmou
+ 	}
+ 
+ 	if (mi->version.v_mode != V_SPECIFIC) {
+-		snprintf(version_opt, sizeof(version_opt) - 1,
+-			"vers=%lu.%lu", mi->version.major, mi->version.minor);
++		if (mi->version.v_mode == V_GENERAL)
++			snprintf(version_opt, sizeof(version_opt) - 1,
++				"vers=%lu", mi->version.major);
++		else
++			snprintf(version_opt, sizeof(version_opt) - 1,
++				"vers=%lu.%lu", mi->version.major,
++				mi->version.minor);
+ 
+ 		if (po_append(options, version_opt) == PO_FAILED) {
+ 			errno = EINVAL;

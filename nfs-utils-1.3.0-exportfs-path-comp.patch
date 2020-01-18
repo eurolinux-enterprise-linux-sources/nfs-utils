@@ -1,0 +1,12 @@
+diff -up nfs-utils-1.3.0/utils/exportfs/exportfs.c.orig nfs-utils-1.3.0/utils/exportfs/exportfs.c
+--- nfs-utils-1.3.0/utils/exportfs/exportfs.c.orig	2017-06-15 11:28:59.541764508 -0400
++++ nfs-utils-1.3.0/utils/exportfs/exportfs.c	2017-06-15 11:30:04.699701243 -0400
+@@ -421,6 +421,8 @@ unexportfs_parsed(char *hname, char *pat
+ 		nlen--;
+ 
+ 	for (exp = exportlist[htype].p_head; exp; exp = exp->m_next) {
++		if (strlen(exp->m_export.e_path) != nlen)
++			continue;
+ 		if (path && strncmp(path, exp->m_export.e_path, nlen))
+ 			continue;
+ 		if (htype != exp->m_client->m_type)

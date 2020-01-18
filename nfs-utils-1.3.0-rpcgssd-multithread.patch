@@ -1,0 +1,594 @@
+diff --git a/aclocal/kerberos5.m4 b/aclocal/kerberos5.m4
+index 0bf35d3..8a0f3e4 100644
+--- a/aclocal/kerberos5.m4
++++ b/aclocal/kerberos5.m4
+@@ -43,15 +43,6 @@ AC_DEFUN([AC_KERBEROS_V5],[
+                    -f $dir/lib/libgssapi_krb5.so \) ; then
+          AC_DEFINE(HAVE_KRB5, 1, [Define this if you have MIT Kerberos libraries])
+          KRBDIR="$dir"
+-  dnl If we are using MIT K5 1.3.1 and before, we *MUST* use the
+-  dnl private function (gss_krb5_ccache_name) to get correct
+-  dnl behavior of changing the ccache used by gssapi.
+-  dnl Starting in 1.3.2, we *DO NOT* want to use
+-  dnl gss_krb5_ccache_name, instead we want to set KRB5CCNAME
+-  dnl to get gssapi to use a different ccache
+-         if test $K5VERS -le 131; then
+-           AC_DEFINE(USE_GSS_KRB5_CCACHE_NAME, 1, [Define this if the private function, gss_krb5_cache_name, must be used to tell the Kerberos library which credentials cache to use. Otherwise, this is done by setting the KRB5CCNAME environment variable])
+-         fi
+          gssapi_lib=gssapi_krb5
+          break
+       dnl The following ugly hack brought on by the split installation
+@@ -92,8 +83,6 @@ AC_DEFUN([AC_KERBEROS_V5],[
+     AC_DEFINE(HAVE_LUCID_CONTEXT_SUPPORT, 1, [Define this if the Kerberos GSS library supports gss_krb5_export_lucid_sec_context]), ,$KRBLIBS)
+   AC_CHECK_LIB($gssapi_lib, gss_krb5_set_allowable_enctypes,
+     AC_DEFINE(HAVE_SET_ALLOWABLE_ENCTYPES, 1, [Define this if the Kerberos GSS library supports gss_krb5_set_allowable_enctypes]), ,$KRBLIBS)
+-  AC_CHECK_LIB($gssapi_lib, gss_krb5_ccache_name,
+-    AC_DEFINE(HAVE_GSS_KRB5_CCACHE_NAME, 1, [Define this if the Kerberos GSS library supports gss_krb5_ccache_name]), ,$KRBLIBS)
+   AC_CHECK_LIB($gssapi_lib, gss_krb5_free_lucid_sec_context,
+     AC_DEFINE(HAVE_GSS_KRB5_FREE_LUCID_SEC_CONTEXT, 1, [Define this if the Kerberos GSS library supports gss_krb5_free_lucid_sec_context]), ,$KRBLIBS)
+ 
+diff --git a/aclocal/libpthread.m4 b/aclocal/libpthread.m4
+new file mode 100644
+index 0000000..e87d2a0
+--- /dev/null
++++ b/aclocal/libpthread.m4
+@@ -0,0 +1,13 @@
++dnl Checks for pthreads library and headers
++dnl
++AC_DEFUN([AC_LIBPTHREAD], [
++
++    dnl Check for library, but do not add -lpthreads to LIBS
++    AC_CHECK_LIB([pthread], [pthread_create], [LIBPTHREAD=-lpthread],
++                 [AC_MSG_ERROR([libpthread not found.])])
++  AC_SUBST(LIBPTHREAD)
++
++  AC_CHECK_HEADERS([pthread.h], ,
++                   [AC_MSG_ERROR([libpthread headers not found.])])
++
++])dnl
+diff --git a/configure.ac b/configure.ac
+index 4ee4db5..56f7f3e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -355,6 +355,9 @@ if test "$enable_gss" = yes; then
+   dnl Invoked after AC_KERBEROS_V5; AC_LIBRPCSECGSS needs to have KRBLIBS set
+   AC_LIBRPCSECGSS
+ 
++  dnl Check for pthreads
++  AC_LIBPTHREAD
++
+   dnl librpcsecgss already has a dependency on libgssapi,
+   dnl but we need to make sure we get the right version
+   if test "$enable_gss" = yes; then
+diff --git a/utils/gssd/Makefile.am b/utils/gssd/Makefile.am
+index fd488a1..f387c16 100644
+--- a/utils/gssd/Makefile.am
++++ b/utils/gssd/Makefile.am
+@@ -42,7 +42,8 @@ gssd_LDADD = \
+ 	$(RPCSECGSS_LIBS) \
+ 	$(KRBLIBS) \
+ 	$(GSSAPI_LIBS) \
+-	$(LIBTIRPC)
++	$(LIBTIRPC) \
++	$(LIBPTHREAD)
+ 
+ gssd_LDFLAGS = \
+ 	$(KRBLDFLAGS)
+diff --git a/utils/gssd/gssd.c b/utils/gssd/gssd.c
+index 7ba27b1..43fccaf 100644
+--- a/utils/gssd/gssd.c
++++ b/utils/gssd/gssd.c
+@@ -87,7 +87,9 @@ unsigned int  rpc_timeout = 5;
+ char *preferred_realm = NULL;
+ /* Avoid DNS reverse lookups on server names */
+ static bool avoid_dns = true;
+-
++int thread_started = false;
++pthread_mutex_t pmutex = PTHREAD_MUTEX_INITIALIZER;
++pthread_cond_t pcond = PTHREAD_COND_INITIALIZER;
+ 
+ TAILQ_HEAD(topdir_list_head, topdir) topdir_list;
+ 
+@@ -361,20 +363,91 @@ gssd_destroy_client(struct clnt_info *clp)
+ 
+ static void gssd_scan(void);
+ 
++static int
++start_upcall_thread(void (*func)(struct clnt_upcall_info *), void *info)
++{
++	pthread_attr_t attr;
++	pthread_t th;
++	int ret;
++
++	ret = pthread_attr_init(&attr);
++	if (ret != 0) {
++		printerr(0, "ERROR: failed to init pthread attr: ret %d: %s\n",
++			 ret, strerror(errno));
++		return ret;
++	}
++	ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
++	if (ret != 0) {
++		printerr(0, "ERROR: failed to create pthread attr: ret %d: "
++			 "%s\n", ret, strerror(errno));
++		return ret;
++	}
++
++	ret = pthread_create(&th, &attr, (void *)func, (void *)info);
++	if (ret != 0)
++		printerr(0, "ERROR: pthread_create failed: ret %d: %s\n",
++			 ret, strerror(errno));
++	return ret;
++}
++
++static struct clnt_upcall_info *alloc_upcall_info(struct clnt_info *clp)
++{
++	struct clnt_upcall_info *info;
++
++	info = malloc(sizeof(struct clnt_upcall_info));
++	if (info == NULL)
++		return NULL;
++	info->clp = clp;
++
++	return info;
++}
++
++/* For each upcall read the upcall info into the buffer, then create a
++ * thread in a detached state so that resources are released back into
++ * the system without the need for a join.
++ */
+ static void
+ gssd_clnt_gssd_cb(int UNUSED(fd), short UNUSED(which), void *data)
+ {
+ 	struct clnt_info *clp = data;
++	struct clnt_upcall_info *info;
++
++	info = alloc_upcall_info(clp);
++	if (info == NULL)
++		return;
++
++	info->lbuflen = read(clp->gssd_fd, info->lbuf, sizeof(info->lbuf));
++	if (info->lbuflen <= 0 || info->lbuf[info->lbuflen-1] != '\n') {
++		printerr(0, "WARNING: %s: failed reading request\n", __func__);
++		free(info);
++		return;
++	}
++	info->lbuf[info->lbuflen-1] = 0;
+ 
+-	handle_gssd_upcall(clp);
++	if (start_upcall_thread(handle_gssd_upcall, info))
++		free(info);
+ }
+ 
+ static void
+ gssd_clnt_krb5_cb(int UNUSED(fd), short UNUSED(which), void *data)
+ {
+ 	struct clnt_info *clp = data;
++	struct clnt_upcall_info *info;
++
++	info = alloc_upcall_info(clp);
++	if (info == NULL)
++		return;
++
++	if (read(clp->krb5_fd, &info->uid,
++			sizeof(info->uid)) < (ssize_t)sizeof(info->uid)) {
++		printerr(0, "WARNING: %s: failed reading uid from krb5 "
++			 "upcall pipe: %s\n", __func__, strerror(errno));
++		free(info);
++		return;
++	}
+ 
+-	handle_krb5_upcall(clp);
++	if (start_upcall_thread(handle_krb5_upcall, info))
++		free(info);
+ }
+ 
+ static struct clnt_info *
+diff --git a/utils/gssd/gssd.h b/utils/gssd/gssd.h
+index c6937c5..f4f5975 100644
+--- a/utils/gssd/gssd.h
++++ b/utils/gssd/gssd.h
+@@ -36,6 +36,7 @@
+ #include <gssapi/gssapi.h>
+ #include <event.h>
+ #include <stdbool.h>
++#include <pthread.h>
+ 
+ #ifndef GSSD_PIPEFS_DIR
+ #define GSSD_PIPEFS_DIR		"/var/lib/nfs/rpc_pipefs"
+@@ -48,7 +49,7 @@
+ #define GSSD_DEFAULT_MACHINE_CRED_SUFFIX	"machine"
+ #define GSSD_DEFAULT_KEYTAB_FILE		"/etc/krb5.keytab"
+ #define GSSD_SERVICE_NAME			"nfs"
+-
++#define RPC_CHAN_BUF_SIZE			32768
+ /*
+  * The gss mechanisms that we can handle
+  */
+@@ -61,6 +62,10 @@ extern int			root_uses_machine_creds;
+ extern unsigned int 		context_timeout;
+ extern unsigned int rpc_timeout;
+ extern char			*preferred_realm;
++extern pthread_mutex_t ple_lock;
++extern pthread_cond_t pcond;
++extern pthread_mutex_t pmutex;
++extern int thread_started;
+ 
+ struct clnt_info {
+ 	TAILQ_ENTRY(clnt_info)	list;
+@@ -80,8 +85,15 @@ struct clnt_info {
+ 	struct			sockaddr_storage addr;
+ };
+ 
+-void handle_krb5_upcall(struct clnt_info *clp);
+-void handle_gssd_upcall(struct clnt_info *clp);
++struct clnt_upcall_info {
++	struct clnt_info 	*clp;
++	char			lbuf[RPC_CHAN_BUF_SIZE];
++	int			lbuflen;
++	uid_t			uid;
++};
++
++void handle_krb5_upcall(struct clnt_upcall_info *clp);
++void handle_gssd_upcall(struct clnt_upcall_info *clp);
+ 
+ 
+ #endif /* _RPC_GSSD_H_ */
+diff --git a/utils/gssd/gssd_proc.c b/utils/gssd/gssd_proc.c
+index 69c6a34..fda7595 100644
+--- a/utils/gssd/gssd_proc.c
++++ b/utils/gssd/gssd_proc.c
+@@ -69,6 +69,7 @@
+ #include <netdb.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
++#include <syscall.h>
+ 
+ #include "gssd.h"
+ #include "err_util.h"
+@@ -442,7 +443,7 @@ change_identity(uid_t uid)
+ 	struct passwd	*pw;
+ 
+ 	/* drop list of supplimentary groups first */
+-	if (setgroups(0, NULL) != 0) {
++	if (syscall(SYS_setgroups, 0, 0) != 0) {
+ 		printerr(0, "WARNING: unable to drop supplimentary groups!");
+ 		return errno;
+ 	}
+@@ -459,20 +460,18 @@ change_identity(uid_t uid)
+ 		}
+ 	}
+ 
+-	/*
+-	 * Switch the GIDs. Note that we leave the saved-set-gid alone in an
+-	 * attempt to prevent attacks via ptrace()
++	/* Switch the UIDs and GIDs. */
++	/* For the threaded version we have to set uid,gid per thread instead
++	 * of per process. glibc setresuid() when called from a thread, it'll
++	 * send a signal to all other threads to synchronize the uid in all
++	 * other threads. To bypass this, we have to call syscall() directly.
+ 	 */
+-	if (setresgid(pw->pw_gid, pw->pw_gid, -1) != 0) {
++	if (syscall(SYS_setresgid, pw->pw_gid, pw->pw_gid, pw->pw_gid) != 0) {
+ 		printerr(0, "WARNING: failed to set gid to %u!\n", pw->pw_gid);
+ 		return errno;
+ 	}
+ 
+-	/*
+-	 * Switch UIDs, but leave saved-set-uid alone to prevent ptrace() by
+-	 * other processes running with this uid.
+-	 */
+-	if (setresuid(uid, uid, -1) != 0) {
++	if (syscall(SYS_setresuid, uid, uid, uid) != 0) {
+ 		printerr(0, "WARNING: Failed to setuid for user with uid %u\n",
+ 				uid);
+ 		return errno;
+@@ -554,7 +553,15 @@ krb5_use_machine_creds(struct clnt_info *clp, uid_t uid, char *tgtname,
+ 			goto out;
+ 		}
+ 		for (ccname = credlist; ccname && *ccname; ccname++) {
+-			gssd_setup_krb5_machine_gss_ccache(*ccname);
++			u_int min_stat;
++
++			if (gss_krb5_ccache_name(&min_stat, *ccname, NULL) !=
++					GSS_S_COMPLETE) {
++				printerr(1, "WARNING: gss_krb5_ccache_name "
++					 "with name '%s' failed (%s)\n",
++					 *ccname, error_message(min_stat));
++				continue;
++			}
+ 			if ((create_auth_rpc_client(clp, tgtname, rpc_clnt,
+ 						&auth, uid,
+ 						AUTHTYPE_KRB5,
+@@ -602,7 +609,6 @@ process_krb5_upcall(struct clnt_info *clp, uid_t uid, int fd, char *tgtname,
+ 	gss_buffer_desc		token;
+ 	int			err, downcall_err = -EACCES;
+ 	OM_uint32		maj_stat, min_stat, lifetime_rec;
+-	pid_t			pid, childpid = -1;
+ 	gss_name_t		gacceptor = GSS_C_NO_NAME;
+ 	gss_OID			mech;
+ 	gss_buffer_desc		acceptor  = {0};
+@@ -635,36 +641,6 @@ process_krb5_upcall(struct clnt_info *clp, uid_t uid, int fd, char *tgtname,
+ 	if (uid != 0 || (uid == 0 && root_uses_machine_creds == 0 &&
+ 				service == NULL)) {
+ 
+-		/* already running as uid 0 */
+-		if (uid == 0)
+-			goto no_fork;
+-
+-		pid = fork();
+-		switch(pid) {
+-		case 0:
+-			/* Child: fall through to rest of function */
+-			childpid = getpid();
+-			unsetenv("KRB5CCNAME");
+-			printerr(2, "CHILD forked pid %d \n", childpid);
+-			break;
+-		case -1:
+-			/* fork() failed! */
+-			printerr(0, "WARNING: unable to fork() to handle"
+-				"upcall: %s\n", strerror(errno));
+-			return;
+-		default:
+-			/* Parent: just wait on child to exit and return */
+-			do {
+-				pid = wait(&err);
+-			} while(pid == -1 && errno != -ECHILD);
+-
+-			if (WIFSIGNALED(err))
+-				printerr(0, "WARNING: forked child was killed"
+-					 "with signal %d\n", WTERMSIG(err));
+-			return;
+-		}
+-no_fork:
+-
+ 		auth = krb5_not_machine_creds(clp, uid, tgtname, &downcall_err,
+ 						&err, &rpc_clnt);
+ 		if (err)
+@@ -730,11 +706,7 @@ out:
+ 	if (rpc_clnt)
+ 		clnt_destroy(rpc_clnt);
+ 
+-	pid = getpid();
+-	if (pid == childpid)
+-		exit(0);
+-	else
+-		return;
++	return;
+ 
+ out_return_error:
+ 	do_error_downcall(fd, uid, downcall_err);
+@@ -742,27 +714,21 @@ out_return_error:
+ }
+ 
+ void
+-handle_krb5_upcall(struct clnt_info *clp)
++handle_krb5_upcall(struct clnt_upcall_info *info)
+ {
+-	uid_t			uid;
+-
+-	if (read(clp->krb5_fd, &uid, sizeof(uid)) < (ssize_t)sizeof(uid)) {
+-		printerr(0, "WARNING: failed reading uid from krb5 "
+-			    "upcall pipe: %s\n", strerror(errno));
+-		return;
+-	}
++	struct clnt_info *clp = info->clp;
+ 
+-	printerr(2, "\n%s: uid %d (%s)\n", __func__, uid, clp->relpath);
++	printerr(2, "\n%s: uid %d (%s)\n", __func__, info->uid, clp->relpath);
+ 
+-	process_krb5_upcall(clp, uid, clp->krb5_fd, NULL, NULL);
++	process_krb5_upcall(clp, info->uid, clp->krb5_fd, NULL, NULL);
++	free(info);
+ }
+ 
+ void
+-handle_gssd_upcall(struct clnt_info *clp)
++handle_gssd_upcall(struct clnt_upcall_info *info)
+ {
++	struct clnt_info	*clp = info->clp;
+ 	uid_t			uid;
+-	char			*lbuf = NULL;
+-	int			lbuflen = 0;
+ 	char			*p;
+ 	char			*mech = NULL;
+ 	char			*uidstr = NULL;
+@@ -770,15 +736,9 @@ handle_gssd_upcall(struct clnt_info *clp)
+ 	char			*service = NULL;
+ 	char			*enctypes = NULL;
+ 
+-	if (readline(clp->gssd_fd, &lbuf, &lbuflen) != 1) {
+-		printerr(0, "WARNING: handle_gssd_upcall: "
+-			    "failed reading request\n");
+-		return;
+-	}
+-
+-	printerr(2, "\n%s: '%s' (%s)\n", __func__, lbuf, clp->relpath);
++	printerr(2, "\n%s: '%s' (%s)\n", __func__, info->lbuf, clp->relpath);
+ 
+-	for (p = strtok(lbuf, " "); p; p = strtok(NULL, " ")) {
++	for (p = strtok(info->lbuf, " "); p; p = strtok(NULL, " ")) {
+ 		if (!strncmp(p, "mech=", strlen("mech=")))
+ 			mech = p + strlen("mech=");
+ 		else if (!strncmp(p, "uid=", strlen("uid=")))
+@@ -794,8 +754,8 @@ handle_gssd_upcall(struct clnt_info *clp)
+ 	if (!mech || strlen(mech) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed to find gss mechanism name "
+-			    "in upcall string '%s'\n", lbuf);
+-		return;
++			    "in upcall string '%s'\n", info->lbuf);
++		goto out;
+ 	}
+ 
+ 	if (uidstr) {
+@@ -807,21 +767,21 @@ handle_gssd_upcall(struct clnt_info *clp)
+ 	if (!uidstr) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed to find uid "
+-			    "in upcall string '%s'\n", lbuf);
+-		return;
++			    "in upcall string '%s'\n", info->lbuf);
++		goto out;
+ 	}
+ 
+ 	if (enctypes && parse_enctypes(enctypes) != 0) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			 "parsing encryption types failed: errno %d\n", errno);
+-		return;
++		goto out;
+ 	}
+ 
+ 	if (target && strlen(target) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			 "failed to parse target name "
+-			 "in upcall string '%s'\n", lbuf);
+-		return;
++			 "in upcall string '%s'\n", info->lbuf);
++		goto out;
+ 	}
+ 
+ 	/*
+@@ -835,8 +795,8 @@ handle_gssd_upcall(struct clnt_info *clp)
+ 	if (service && strlen(service) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			 "failed to parse service type "
+-			 "in upcall string '%s'\n", lbuf);
+-		return;
++			 "in upcall string '%s'\n", info->lbuf);
++		goto out;
+ 	}
+ 
+ 	if (strcmp(mech, "krb5") == 0 && clp->servername)
+@@ -847,5 +807,8 @@ handle_gssd_upcall(struct clnt_info *clp)
+ 				 "received unknown gss mech '%s'\n", mech);
+ 		do_error_downcall(clp->gssd_fd, uid, -EACCES);
+ 	}
++out:
++	free(info);
++	return;
+ }
+ 
+diff --git a/utils/gssd/krb5_util.c b/utils/gssd/krb5_util.c
+index 3849b6a..bc29787 100644
+--- a/utils/gssd/krb5_util.c
++++ b/utils/gssd/krb5_util.c
+@@ -128,6 +128,7 @@
+ 
+ /* Global list of principals/cache file names for machine credentials */
+ struct gssd_k5_kt_princ *gssd_k5_kt_princ_list = NULL;
++pthread_mutex_t ple_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
+ #ifdef HAVE_SET_ALLOWABLE_ENCTYPES
+ int limit_to_legacy_enctypes = 0;
+@@ -467,37 +468,6 @@ gssd_get_single_krb5_cred(krb5_context context,
+ }
+ 
+ /*
+- * Depending on the version of Kerberos, we either need to use
+- * a private function, or simply set the environment variable.
+- */
+-static void
+-gssd_set_krb5_ccache_name(char *ccname)
+-{
+-#ifdef USE_GSS_KRB5_CCACHE_NAME
+-	u_int	maj_stat, min_stat;
+-
+-	printerr(3, "using gss_krb5_ccache_name to select krb5 ccache %s\n",
+-		 ccname);
+-	maj_stat = gss_krb5_ccache_name(&min_stat, ccname, NULL);
+-	if (maj_stat != GSS_S_COMPLETE) {
+-		printerr(0, "WARNING: gss_krb5_ccache_name with "
+-			"name '%s' failed (%s)\n",
+-			ccname, error_message(min_stat));
+-	}
+-#else
+-	/*
+-	 * Set the KRB5CCNAME environment variable to tell the krb5 code
+-	 * which credentials cache to use.  (Instead of using the private
+-	 * function above for which there is no generic gssapi
+-	 * equivalent.)
+-	 */
+-	printerr(3, "using environment variable to select krb5 ccache %s\n",
+-		 ccname);
+-	setenv("KRB5CCNAME", ccname, 1);
+-#endif
+-}
+-
+-/*
+  * Given a principal, find a matching ple structure
+  */
+ static struct gssd_k5_kt_princ *
+@@ -586,10 +556,12 @@ get_ple_by_princ(krb5_context context, krb5_principal princ)
+ 
+ 	/* Need to serialize list if we ever become multi-threaded! */
+ 
++	pthread_mutex_lock(&ple_lock);
+ 	ple = find_ple_by_princ(context, princ);
+ 	if (ple == NULL) {
+ 		ple = new_ple(context, princ);
+ 	}
++	pthread_mutex_unlock(&ple_lock);
+ 
+ 	return ple;
+ }
+@@ -1091,6 +1063,7 @@ gssd_setup_krb5_user_gss_ccache(uid_t uid, char *servername, char *dirpattern)
+ 	const char		*cctype;
+ 	struct dirent		*d;
+ 	int			err, i, j;
++	u_int			maj_stat, min_stat;
+ 
+ 	printerr(3, "looking for client creds with uid %u for "
+ 		    "server %s in %s\n", uid, servername, dirpattern);
+@@ -1126,22 +1099,16 @@ gssd_setup_krb5_user_gss_ccache(uid_t uid, char *servername, char *dirpattern)
+ 
+ 	printerr(2, "using %s as credentials cache for client with "
+ 		    "uid %u for server %s\n", buf, uid, servername);
+-	gssd_set_krb5_ccache_name(buf);
+-	return 0;
+-}
+ 
+-/*
+- * Let the gss code know where to find the machine credentials ccache.
+- *
+- * Returns:
+- *	void
+- */
+-void
+-gssd_setup_krb5_machine_gss_ccache(char *ccname)
+-{
+-	printerr(2, "using %s as credentials cache for machine creds\n",
+-		 ccname);
+-	gssd_set_krb5_ccache_name(ccname);
++	printerr(3, "using gss_krb5_ccache_name to select krb5 ccache %s\n",
++		 buf);
++	maj_stat = gss_krb5_ccache_name(&min_stat, buf, NULL);
++	if (maj_stat != GSS_S_COMPLETE) {
++		printerr(0, "ERROR: unable to get user cred cache '%s' "
++			 "failed (%s)\n", buf, error_message(min_stat));
++		return maj_stat;
++	}
++	return 0;
+ }
+ 
+ /*
+diff --git a/utils/gssd/krb5_util.h b/utils/gssd/krb5_util.h
+index a319588..e3bbb07 100644
+--- a/utils/gssd/krb5_util.h
++++ b/utils/gssd/krb5_util.h
+@@ -27,7 +27,6 @@ int gssd_setup_krb5_user_gss_ccache(uid_t uid, char *servername,
+ 				     char *dirname);
+ int  gssd_get_krb5_machine_cred_list(char ***list);
+ void gssd_free_krb5_machine_cred_list(char **list);
+-void gssd_setup_krb5_machine_gss_ccache(char *servername);
+ void gssd_destroy_krb5_machine_creds(void);
+ int  gssd_refresh_krb5_machine_credential(char *hostname,
+ 					  struct gssd_k5_kt_princ *ple, 
+@@ -55,8 +54,6 @@ int limit_krb5_enctypes(struct rpc_gss_sec *sec);
+ #define k5_free_unparsed_name(ctx, name)	free(name)
+ #define k5_free_default_realm(ctx, realm)	free(realm)
+ #define k5_free_kt_entry(ctx, kte)		krb5_kt_free_entry((ctx),(kte))
+-#undef USE_GSS_KRB5_CCACHE_NAME
+-#define USE_GSS_KRB5_CCACHE_NAME 1
+ #endif
+ 
+ #endif /* KRB5_UTIL_H */

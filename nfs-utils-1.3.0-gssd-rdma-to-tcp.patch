@@ -1,0 +1,26 @@
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.c.orig nfs-utils-1.3.0/utils/gssd/gssd.c
+--- nfs-utils-1.3.0/utils/gssd/gssd.c.orig	2017-02-28 14:24:20.296676493 -0500
++++ nfs-utils-1.3.0/utils/gssd/gssd.c	2017-02-28 14:45:36.140482510 -0500
+@@ -305,6 +305,22 @@ gssd_read_service_info(int dirfd, struct
+ 		goto fail;
+ 	}
+ 
++	/*
++	 * The user space RPC library has no support for
++	 * RPC-over-RDMA at this time, so change 'rdma'
++	 * to 'tcp', and '20049' to '2049'.
++	 */
++	if (strcmp(protoname, "rdma") == 0) {
++		free(protoname);
++		protoname = strdup("tcp");
++		if (!protoname)
++			goto fail;
++		free(port);
++		port = strdup("2049");
++		if (!port)
++			goto fail;
++	}
++
+ 	if (!gssd_addrstr_to_sockaddr((struct sockaddr *)&clp->addr,
+ 				 address, port ? port : ""))
+ 		goto fail;

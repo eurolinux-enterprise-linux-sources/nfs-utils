@@ -1,0 +1,55 @@
+diff --git a/support/export/hostname.c b/support/export/hostname.c
+index cdf9e76..816b098 100644
+--- a/support/export/hostname.c
++++ b/support/export/hostname.c
+@@ -230,7 +230,7 @@ host_canonname(const struct sockaddr *sap)
+ 	default:
+ 		(void)getnameinfo(sap, salen, buf, (socklen_t)sizeof(buf),
+ 							NULL, 0, NI_NUMERICHOST);
+-		xlog(D_GENERAL, "%s: failed to resolve %s: %s",
++		xlog(D_PARSE, "%s: failed to resolve %s: %s",
+ 				__func__, buf, gai_strerror(error));
+ 		return NULL;
+ 	}
+diff --git a/utils/exportfs/exportfs.c b/utils/exportfs/exportfs.c
+index 614c3dc..bc3f00f 100644
+--- a/utils/exportfs/exportfs.c
++++ b/utils/exportfs/exportfs.c
+@@ -108,11 +108,14 @@ main(int argc, char **argv)
+ 	xlog_stderr(1);
+ 	xlog_syslog(0);
+ 
+-	while ((c = getopt(argc, argv, "afhio:ruvs")) != EOF) {
++	while ((c = getopt(argc, argv, "ad:fhio:ruvs")) != EOF) {
+ 		switch(c) {
+ 		case 'a':
+ 			f_all = 1;
+ 			break;
++		case 'd':
++			xlog_sconfig(optarg, 1);
++			break;
+ 		case 'f':
+ 			force_flush = 1;
+ 			break;
+@@ -869,6 +872,6 @@ error(nfs_export *exp, int err)
+ static void
+ usage(const char *progname, int n)
+ {
+-	fprintf(stderr, "usage: %s [-afhioruvs] [host:/path]\n", progname);
++	fprintf(stderr, "usage: %s [-adfhioruvs] [host:/path]\n", progname);
+ 	exit(n);
+ }
+diff --git a/utils/exportfs/exportfs.man b/utils/exportfs/exportfs.man
+index 75d952a..fdf9260 100644
+--- a/utils/exportfs/exportfs.man
++++ b/utils/exportfs/exportfs.man
+@@ -88,6 +88,9 @@ appropriate export entry for the host given in
+ to be added to the kernel's export table.
+ .SH OPTIONS
+ .TP
++.B \-d kind " or " \-\-debug kind
++Turn on debugging. Valid kinds are: all, auth, call, general and parse.
++.TP
+ .B -a
+ Export or unexport all directories.
+ .TP

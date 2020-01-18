@@ -1,0 +1,69 @@
+diff --git a/utils/gssd/gssd_proc.c b/utils/gssd/gssd_proc.c
+index 646d7e3..14cf7b8 100644
+--- a/utils/gssd/gssd_proc.c
++++ b/utils/gssd/gssd_proc.c
+@@ -728,10 +728,18 @@ handle_gssd_upcall(struct clnt_upcall_info *info)
+ 	char			*target = NULL;
+ 	char			*service = NULL;
+ 	char			*enctypes = NULL;
++	char			*upcall_str;
++	char			*pbuf = info->lbuf;
+ 
+ 	printerr(2, "\n%s: '%s' (%s)\n", __func__, info->lbuf, clp->relpath);
+ 
+-	for (p = strtok(info->lbuf, " "); p; p = strtok(NULL, " ")) {
++	upcall_str = strdup(info->lbuf);
++	if (upcall_str == NULL) {
++		printerr(0, "ERROR: malloc failure\n");
++		goto out_nomem;
++	}
++
++	while ((p = strsep(&pbuf, " "))) {
+ 		if (!strncmp(p, "mech=", strlen("mech=")))
+ 			mech = p + strlen("mech=");
+ 		else if (!strncmp(p, "uid=", strlen("uid=")))
+@@ -747,7 +755,7 @@ handle_gssd_upcall(struct clnt_upcall_info *info)
+ 	if (!mech || strlen(mech) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed to find gss mechanism name "
+-			    "in upcall string '%s'\n", info->lbuf);
++			    "in upcall string '%s'\n", upcall_str);
+ 		goto out;
+ 	}
+ 
+@@ -760,7 +768,7 @@ handle_gssd_upcall(struct clnt_upcall_info *info)
+ 	if (!uidstr) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed to find uid "
+-			    "in upcall string '%s'\n", info->lbuf);
++			    "in upcall string '%s'\n", upcall_str);
+ 		goto out;
+ 	}
+ 
+@@ -773,7 +781,7 @@ handle_gssd_upcall(struct clnt_upcall_info *info)
+ 	if (target && strlen(target) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			 "failed to parse target name "
+-			 "in upcall string '%s'\n", info->lbuf);
++			 "in upcall string '%s'\n", upcall_str);
+ 		goto out;
+ 	}
+ 
+@@ -788,7 +796,7 @@ handle_gssd_upcall(struct clnt_upcall_info *info)
+ 	if (service && strlen(service) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			 "failed to parse service type "
+-			 "in upcall string '%s'\n", info->lbuf);
++			 "in upcall string '%s'\n", upcall_str);
+ 		goto out;
+ 	}
+ 
+@@ -801,6 +809,8 @@ handle_gssd_upcall(struct clnt_upcall_info *info)
+ 		do_error_downcall(clp->gssd_fd, uid, -EACCES);
+ 	}
+ out:
++	free(upcall_str);
++out_nomem:
+ 	free(info);
+ 	return;
+ }

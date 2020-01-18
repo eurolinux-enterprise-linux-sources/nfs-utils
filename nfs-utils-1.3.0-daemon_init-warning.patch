@@ -1,0 +1,24 @@
+commit 19e6ba690c7e9674dae006cfce89f638c8d8edab
+Author: Steve Dickson <steved@redhat.com>
+Date:   Wed Nov 4 16:25:28 2015 -0500
+
+    mydaemon.c: Removed a warning
+    
+    Commit 273b4647 introduced the following warning:
+        mydaemon.c:125:2: warning: implicit declaration of function 'closelog'
+        [-Wimplicit-function-declaration]
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/support/nfs/mydaemon.c b/support/nfs/mydaemon.c
+index 701cfd9..343e80b 100644
+--- a/support/nfs/mydaemon.c
++++ b/support/nfs/mydaemon.c
+@@ -49,6 +49,7 @@
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <syslog.h>
+ #include <xlog.h>
+ 
+ #include "nfslib.h"

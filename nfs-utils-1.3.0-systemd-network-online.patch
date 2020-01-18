@@ -1,0 +1,69 @@
+diff --git a/systemd/nfs-mountd.service b/systemd/nfs-mountd.service
+index 8a39f3e..ed357a2 100644
+--- a/systemd/nfs-mountd.service
++++ b/systemd/nfs-mountd.service
+@@ -2,8 +2,10 @@
+ Description=NFS Mount Daemon
+ DefaultDependencies=no
+ Requires=proc-fs-nfsd.mount
++Wants=network-online.target
+ After=proc-fs-nfsd.mount
+-After=network.target local-fs.target
++After=network-online.target local-fs.target
++After=rpcbind.socket
+ BindsTo=nfs-server.service
+ 
+ Wants=nfs-config.service
+diff --git a/systemd/nfs-server.service b/systemd/nfs-server.service
+index 7f60f39..d285c6e 100644
+--- a/systemd/nfs-server.service
++++ b/systemd/nfs-server.service
+@@ -1,13 +1,14 @@
+ [Unit]
+ Description=NFS server and services
+ DefaultDependencies=no
+-Requires= network.target proc-fs-nfsd.mount rpcbind.target
++Requires= network.target proc-fs-nfsd.mount
+ Requires= nfs-mountd.service
++Wants=rpcbind.socket network-online.target
+ Wants=rpc-statd.service nfs-idmapd.service
+ Wants=rpc-statd-notify.service
+ 
+-After= local-fs.target
+-After= network.target proc-fs-nfsd.mount rpcbind.service nfs-mountd.service
++After= network-online.target local-fs.target
++After= proc-fs-nfsd.mount rpcbind.socket nfs-mountd.service
+ After= nfs-idmapd.service rpc-statd.service
+ Before= rpc-statd-notify.service
+ 
+diff --git a/systemd/rpc-statd-notify.service b/systemd/rpc-statd-notify.service
+index 7a37ce1..f27f76d 100644
+--- a/systemd/rpc-statd-notify.service
++++ b/systemd/rpc-statd-notify.service
+@@ -1,8 +1,8 @@
+ [Unit]
+ Description=Notify NFS peers of a restart
+ DefaultDependencies=no
+-Requires=network.target
+-After=local-fs.target network.target nss-lookup.target
++Wants=network-online.target
++After=local-fs.target network-online.target nss-lookup.target
+ 
+ # Do not start up in HA environments
+ ConditionPathExists=!/var/lib/nfs/statd/sm.ha
+diff --git a/systemd/rpc-statd.service b/systemd/rpc-statd.service
+index 2a054be..1ed60a8 100644
+--- a/systemd/rpc-statd.service
++++ b/systemd/rpc-statd.service
+@@ -2,8 +2,9 @@
+ Description=NFS status monitor for NFSv2/3 locking.
+ DefaultDependencies=no
+ Conflicts=umount.target
+-Requires=nss-lookup.target rpcbind.target
+-After=network.target nss-lookup.target rpcbind.service
++Requires=nss-lookup.target rpcbind.socket
++Wants=network-online.target
++After=network-online.target nss-lookup.target rpcbind.socket
+ 
+ PartOf=nfs-utils.service
+ 

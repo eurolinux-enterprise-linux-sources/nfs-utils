@@ -1,0 +1,26 @@
+commit 3e2ab78a2cfbc2d11c31ced8d3f538d5aae757f1
+Author: Scott Mayhew <smayhew@redhat.com>
+Date:   Thu Sep 22 13:33:33 2016 -0400
+
+    mountstats: add pNFS READs and WRITEs
+    
+    These counters are already in /proc/self/mountstats but the mountstats
+    program doesn't display them.
+    
+    Signed-off-by: Scott Mayhew <smayhew@redhat.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+    Fixes: https://bugzilla.redhat.com/show_bug.cgi?id=1377740
+
+diff --git a/tools/mountstats/mountstats.py b/tools/mountstats/mountstats.py
+index 4ca4bc4..88ccdae 100644
+--- a/tools/mountstats/mountstats.py
++++ b/tools/mountstats/mountstats.py
+@@ -412,6 +412,8 @@ class DeviceData:
+         print('  short reads: %d  short writes: %d' % \
+             (self.__nfs_data['shortreads'], self.__nfs_data['shortwrites']))
+         print('  NFSERR_DELAYs from server: %d' % self.__nfs_data['delay'])
++        print('  pNFS READs: %d' % self.__nfs_data['pnfsreads'])
++        print('  pNFS WRITEs: %d' % self.__nfs_data['pnfswrites'])
+ 
+     def display_nfs_bytes(self):
+         """Pretty-print the NFS event counters

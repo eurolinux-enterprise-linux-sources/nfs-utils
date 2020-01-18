@@ -1,0 +1,2564 @@
+diff -up nfs-utils-1.3.0/aclocal/libtirpc.m4.orig nfs-utils-1.3.0/aclocal/libtirpc.m4
+--- nfs-utils-1.3.0/aclocal/libtirpc.m4.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/aclocal/libtirpc.m4	2016-04-15 11:42:49.532156526 -0400
+@@ -2,61 +2,61 @@ dnl Checks for TI-RPC library and header
+ dnl
+ AC_DEFUN([AC_LIBTIRPC], [
+ 
++  AS_IF(
++    [test "$enable_tirpc" != "no"],
++    [PKG_CHECK_MODULES([TIRPC], [libtirpc],
++                      [LIBTIRPC="${TIRPC_LIBS}"
++                       AM_CPPFLAGS="${AM_CPPFLAGS} ${TIRPC_CFLAGS}"
++                       AC_DEFINE([HAVE_LIBTIRPC], [1],
++                                 [Define to 1 if you have and wish to use libtirpc.])],
++                      [AC_LIBTIRPC_OLD
++                       AS_IF([test "$enable_tirpc" = "yes" -a -z "${LIBTIRPC}"],
++                             [AC_MSG_ERROR([libtirpc not found.])])])])
++
++     AS_IF([test -n "${LIBTIRPC}"],
++           [AC_CHECK_LIB([tirpc], [authgss_free_private_data],
++                         [AC_DEFINE([HAVE_AUTHGSS_FREE_PRIVATE_DATA], [1],
++                                    [Define to 1 if your rpcsec library provides authgss_free_private_data])],,
++                         [${LIBS}])])
++
++     AS_IF([test -n "${LIBTIRPC}"],
++           [AC_CHECK_LIB([tirpc], [libtirpc_set_debug],
++                         [AC_DEFINE([HAVE_LIBTIRPC_SET_DEBUG], [1],
++                                    [Define to 1 if your tirpc library provides libtirpc_set_debug])],,
++                         [${LIBS}])])
++
++  AC_SUBST([AM_CPPFLAGS])
++  AC_SUBST(LIBTIRPC)
++
++])dnl
++
++dnl Old way of checking libtirpc without pkg-config
++dnl This can go away when virtually all libtirpc provide a .pc file
++dnl
++AC_DEFUN([AC_LIBTIRPC_OLD], [
++
+   AC_ARG_WITH([tirpcinclude],
+               [AC_HELP_STRING([--with-tirpcinclude=DIR],
+                               [use TI-RPC headers in DIR])],
+               [tirpc_header_dir=$withval],
+               [tirpc_header_dir=/usr/include/tirpc])
+ 
+-  dnl if --enable-tirpc was specifed, the following components
+-  dnl must be present, and we set up HAVE_ macros for them.
+-
+-  if test "$enable_tirpc" != "no"; then
+-
+-    dnl look for the library
+-    AC_CHECK_LIB([tirpc], [clnt_tli_create], [:],
+-                 [if test "$enable_tirpc" = "yes"; then
+-			AC_MSG_ERROR([libtirpc not found.])
+-		  else
+-			AC_MSG_WARN([libtirpc not found. TIRPC disabled!])
+-			enable_tirpc="no"
+-		  fi])
+-  fi
+-
+-  if test "$enable_tirpc" != "no"; then
+-
+-    dnl Check if library contains authgss_free_private_data
+-    AC_CHECK_LIB([tirpc], [authgss_free_private_data], [have_free_private_data=yes],
+-			[have_free_private_data=no])
+-  fi
+-
+-  if test "$enable_tirpc" != "no"; then
+-    dnl also must have the headers installed where we expect
+-    dnl look for headers; add -I compiler option if found
+-    AC_CHECK_HEADERS([${tirpc_header_dir}/netconfig.h],
+-    		      AC_SUBST([AM_CPPFLAGS], ["-I${tirpc_header_dir}"]),
+-		      [if test "$enable_tirpc" = "yes"; then
+-			 AC_MSG_ERROR([libtirpc headers not found.])
+-		       else
+-			 AC_MSG_WARN([libtirpc headers not found. TIRPC disabled!])
+-			 enable_tirpc="no"
+-		       fi])
+-
+-  fi
+-
+-  dnl now set $LIBTIRPC accordingly
+-  if test "$enable_tirpc" != "no"; then
+-    AC_DEFINE([HAVE_LIBTIRPC], 1,
+-              [Define to 1 if you have and wish to use libtirpc.])
+-    LIBTIRPC="-ltirpc"
+-    if test "$have_free_private_data" = "yes"; then
+-      AC_DEFINE([HAVE_AUTHGSS_FREE_PRIVATE_DATA], 1,
+-	      [Define to 1 if your rpcsec library provides authgss_free_private_data,])
+-    fi
+-  else
+-    LIBTIRPC=""
+-  fi
+-
+-  AC_SUBST(LIBTIRPC)
++  dnl Look for the library
++  AC_CHECK_LIB([tirpc], [clnt_tli_create],
++               [has_libtirpc="yes"],
++               [has_libtirpc="no"])
++
++  dnl Also must have the headers installed where we expect
++  dnl to look for headers; add -I compiler option if found
++  AS_IF([test "$has_libtirpc" = "yes"],
++        [AC_CHECK_HEADERS([${tirpc_header_dir}/netconfig.h],
++                          [AC_SUBST([AM_CPPFLAGS], ["-I${tirpc_header_dir}"])],
++                          [has_libtirpc="no"])])
++
++  dnl Now set $LIBTIRPC accordingly
++  AS_IF([test "$has_libtirpc" = "yes"],
++        [AC_DEFINE([HAVE_LIBTIRPC], [1],
++                   [Define to 1 if you have and wish to use libtirpc.])
++         LIBTIRPC="-ltirpc"])
+ 
+ ])dnl
+diff -up nfs-utils-1.3.0/support/include/nfslib.h.orig nfs-utils-1.3.0/support/include/nfslib.h
+--- nfs-utils-1.3.0/support/include/nfslib.h.orig	2016-04-15 11:42:13.930460892 -0400
++++ nfs-utils-1.3.0/support/include/nfslib.h	2016-04-15 11:42:38.365938345 -0400
+@@ -17,6 +17,7 @@
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <stdio.h>
++#include <stdbool.h>
+ #include <paths.h>
+ #include <rpcsvc/nfs_prot.h>
+ #include <nfs/nfs.h>
+@@ -129,8 +130,8 @@ void			fendrmtabent(FILE *fp);
+ void			frewindrmtabent(FILE *fp);
+ 
+ /* mydaemon */
+-void mydaemon(int nochdir, int noclose, int *pipefds);
+-void release_parent(int *pipefds);
++void daemon_init(bool fg);
++void daemon_ready(void);
+ 
+ /*
+  * wildmat borrowed from INN
+@@ -182,6 +183,9 @@ size_t  strlcpy(char *, const char *, si
+ ssize_t atomicio(ssize_t (*f) (int, void*, size_t),
+ 		 int, void *, size_t);
+ 
++#ifdef HAVE_LIBTIRPC_SET_DEBUG
++void  libtirpc_set_debug(char *name, int level, int use_stderr);
++#endif
+ 
+ #define UNUSED(x) UNUSED_ ## x __attribute__((unused))
+ 
+diff -up nfs-utils-1.3.0/support/nfs/mydaemon.c.orig nfs-utils-1.3.0/support/nfs/mydaemon.c
+--- nfs-utils-1.3.0/support/nfs/mydaemon.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/support/nfs/mydaemon.c	2016-04-15 11:42:38.366938365 -0400
+@@ -46,56 +46,61 @@
+ #include <errno.h>
+ #include <unistd.h>
+ #include <stdio.h>
++#include <stdbool.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <xlog.h>
+ 
++#include "nfslib.h"
++
++static int pipefds[2] = { -1, -1};
++
+ /**
+- * mydaemon - daemonize, but have parent wait to exit
+- * @nochdir:	skip chdir()'ing the child to / after forking if true
+- * @noclose:	skip closing stdin/stdout/stderr if true
+- * @pipefds:	pointer to 2 element array of pipefds
++ * daemon_init - initial daemon setup
++ * @fg:		whether to run in the foreground
+  *
+  * This function is like daemon(), but with our own special sauce to delay
+  * the exit of the parent until the child is set up properly. A pipe is created
+  * between parent and child. The parent process will wait to exit until the
+- * child dies or writes a '1' on the pipe signaling that it started
+- * successfully.
++ * child dies or writes an int on the pipe signaling its status.
+  */
+ void
+-mydaemon(int nochdir, int noclose, int *pipefds)
++daemon_init(bool fg)
+ {
+ 	int pid, status, tempfd;
+ 
++	if (fg)
++		return;
++
+ 	if (pipe(pipefds) < 0) {
+ 		xlog_err("mydaemon: pipe() failed: errno %d (%s)\n",
+ 			 errno, strerror(errno));
+-		exit(1);
++		exit(EXIT_FAILURE);
+ 	}
+-	if ((pid = fork ()) < 0) {
++
++	pid = fork();
++	if (pid < 0) {
+ 		xlog_err("mydaemon: fork() failed: errno %d (%s)\n",
+ 			 errno, strerror(errno));
+-		exit(1);
++		exit(EXIT_FAILURE);
+ 	}
+ 
+-	if (pid != 0) {
+-		/*
+-		 * Parent. Wait for status from child.
+-		 */
++	if (pid > 0) {
++		/* Parent */
+ 		close(pipefds[1]);
+-		if (read(pipefds[0], &status, 1) != 1)
+-			exit(1);
+-		exit (0);
++		if (read(pipefds[0], &status, sizeof(status)) != sizeof(status))
++			exit(EXIT_FAILURE);
++		exit(status);
+ 	}
+-	/* Child.	*/
++
++	/* Child */
+ 	close(pipefds[0]);
+ 	setsid ();
+-	if (nochdir == 0) {
+-		if (chdir ("/") == -1) {
+-			xlog_err("mydaemon: chdir() failed: errno %d (%s)\n",
+-				 errno, strerror(errno));
+-			exit(1);
+-		}
++
++	if (chdir ("/")) {
++		xlog_err("mydaemon: chdir() failed: errno %d (%s)\n",
++			 errno, strerror(errno));
++		exit(EXIT_FAILURE);
+ 	}
+ 
+ 	while (pipefds[1] <= 2) {
+@@ -103,41 +108,39 @@ mydaemon(int nochdir, int noclose, int *
+ 		if (pipefds[1] < 0) {
+ 			xlog_err("mydaemon: dup() failed: errno %d (%s)\n",
+ 				 errno, strerror(errno));
+-			exit(1);
++			exit(EXIT_FAILURE);
+ 		}
+ 	}
+ 
+-	if (noclose == 0) {
+-		tempfd = open("/dev/null", O_RDWR);
+-		if (tempfd >= 0) {
+-			dup2(tempfd, 0);
+-			dup2(tempfd, 1);
+-			dup2(tempfd, 2);
+-			close(tempfd);
+-		} else {
+-			xlog_err("mydaemon: can't open /dev/null: errno %d "
+-				 "(%s)\n", errno, strerror(errno));
+-			exit(1);
+-		}
++	tempfd = open("/dev/null", O_RDWR);
++	if (tempfd < 0) {
++		xlog_err("mydaemon: can't open /dev/null: errno %d "
++			 "(%s)\n", errno, strerror(errno));
++		exit(EXIT_FAILURE);
+ 	}
+ 
+-	return;
++	dup2(tempfd, 0);
++	dup2(tempfd, 1);
++	dup2(tempfd, 2);
++	closelog();
++	dup2(pipefds[1], 3);
++	pipefds[1] = 3;
++	closeall(4);
+ }
+ 
+ /**
+- * release_parent - tell the parent that it can exit now
+- * @pipefds:	pipefd array that was previously passed to mydaemon()
++ * daemon_ready - tell interested parties that the daemon is ready
+  *
+- * This function tells the parent process of mydaemon() that it's now clear
+- * to exit(0).
++ * This function tells e.g. the parent process that the daemon is up
++ * and running.
+  */
+ void
+-release_parent(int *pipefds)
++daemon_ready(void)
+ {
+-	int status;
++	int status = 0;
+ 
+ 	if (pipefds[1] > 0) {
+-		if (write(pipefds[1], &status, 1) != 1) {
++		if (write(pipefds[1], &status, sizeof(status)) != sizeof(status)) {
+ 			xlog_err("WARN: writing to parent pipe failed: errno "
+ 				 "%d (%s)\n", errno, strerror(errno));
+ 		}
+diff -up nfs-utils-1.3.0/support/nfs/svc_create.c.orig nfs-utils-1.3.0/support/nfs/svc_create.c
+--- nfs-utils-1.3.0/support/nfs/svc_create.c.orig	2016-04-15 11:42:13.931460911 -0400
++++ nfs-utils-1.3.0/support/nfs/svc_create.c	2016-04-15 11:42:38.366938365 -0400
+@@ -133,7 +133,7 @@ svc_create_bindaddr(struct netconfig *nc
+ 		hint.ai_family = AF_INET6;
+ #endif	/* IPV6_SUPPORTED */
+ 	else {
+-		xlog(D_GENERAL, "Unrecognized bind address family: %s",
++		xlog(L_ERROR, "Unrecognized bind address family: %s",
+ 			nconf->nc_protofmly);
+ 		return NULL;
+ 	}
+@@ -143,7 +143,7 @@ svc_create_bindaddr(struct netconfig *nc
+ 	else if (strcmp(nconf->nc_proto, NC_TCP) == 0)
+ 		hint.ai_protocol = (int)IPPROTO_TCP;
+ 	else {
+-		xlog(D_GENERAL, "Unrecognized bind address protocol: %s",
++		xlog(L_ERROR, "Unrecognized bind address protocol: %s",
+ 			nconf->nc_proto);
+ 		return NULL;
+ 	}
+@@ -275,7 +275,7 @@ svc_create_nconf_rand_port(const char *n
+ 	xprt = svc_tli_create(RPC_ANYFD, nconf, &bindaddr, 0, 0);
+ 	freeaddrinfo(ai);
+ 	if (xprt == NULL) {
+-		xlog(D_GENERAL, "Failed to create listener xprt "
++		xlog(L_ERROR, "Failed to create listener xprt "
+ 			"(%s, %u, %s)", name, version, nconf->nc_netid);
+ 		return 0;
+ 	}
+@@ -286,10 +286,12 @@ svc_create_nconf_rand_port(const char *n
+ 		return 0;
+ 	}
+ 
++	rpc_createerr.cf_stat = rpc_createerr.cf_error.re_errno = 0;
+ 	if (!svc_reg(xprt, program, version, dispatch, nconf)) {
+ 		/* svc_reg(3) destroys @xprt in this case */
+-		xlog(D_GENERAL, "Failed to register (%s, %u, %s)",
+-				name, version, nconf->nc_netid);
++		xlog(L_ERROR, "Failed to register (%s, %u, %s): %s",
++				name, version, nconf->nc_netid, 
++				clnt_spcreateerror("svc_reg() err"));
+ 		return 0;
+ 	}
+ 
+diff -up nfs-utils-1.3.0/support/nfs/svc_socket.c.orig nfs-utils-1.3.0/support/nfs/svc_socket.c
+--- nfs-utils-1.3.0/support/nfs/svc_socket.c.orig	2016-04-15 11:42:13.931460911 -0400
++++ nfs-utils-1.3.0/support/nfs/svc_socket.c	2016-04-15 11:42:38.367938385 -0400
+@@ -24,6 +24,7 @@
+ #include <sys/socket.h>
+ #include <sys/fcntl.h>
+ #include <errno.h>
++#include "xlog.h"
+ 
+ #ifdef _LIBC
+ # include <libintl.h>
+@@ -90,9 +91,9 @@ svcsock_nonblock(int sock)
+ 	 * connection.
+ 	 */
+ 	if ((flags = fcntl(sock, F_GETFL)) < 0)
+-		perror(_("svc_socket: can't get socket flags"));
++		xlog(L_ERROR, "svc_socket: can't get socket flags: %m");
+ 	else if (fcntl(sock, F_SETFL, flags|O_NONBLOCK) < 0)
+-		perror(_("svc_socket: can't set socket flags"));
++		xlog(L_ERROR, "svc_socket: can't set socket flags: %m");
+ 	else
+ 		return sock;
+ 
+@@ -110,7 +111,7 @@ svc_socket (u_long number, int type, int
+ 
+   if ((sock = __socket (AF_INET, type, protocol)) < 0)
+     {
+-      perror (_("svc_socket: socket creation problem"));
++      xlog(L_ERROR, "svc_socket: socket creation problem: %m");
+       return sock;
+     }
+ 
+@@ -121,7 +122,7 @@ svc_socket (u_long number, int type, int
+ 			sizeof (ret));
+       if (ret < 0)
+ 	{
+-	  perror (_("svc_socket: socket reuse problem"));
++	  xlog(L_ERROR, "svc_socket: socket reuse problem: %m");
+ 	  return ret;
+ 	}
+     }
+@@ -132,7 +133,7 @@ svc_socket (u_long number, int type, int
+ 
+   if (bind(sock, (struct sockaddr *) &addr, len) < 0)
+     {
+-      perror (_("svc_socket: bind problem"));
++      xlog(L_ERROR, "svc_socket: bind problem: %m");
+       (void) __close(sock);
+       sock = -1;
+     }
+diff -up nfs-utils-1.3.0/utils/gssd/context_heimdal.c.orig nfs-utils-1.3.0/utils/gssd/context_heimdal.c
+--- nfs-utils-1.3.0/utils/gssd/context_heimdal.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/context_heimdal.c	2016-04-15 11:42:38.367938385 -0400
+@@ -260,7 +260,7 @@ serialize_krb5_ctx(gss_ctx_id_t *_ctx, g
+ 	if (write_heimdal_seq_key(&p, end, ctx)) goto out_err;
+ 
+ 	buf->length = p - (char *)buf->value;
+-	printerr(2, "serialize_krb5_ctx: returning buffer "
++	printerr(4, "serialize_krb5_ctx: returning buffer "
+ 		    "with %d bytes\n", buf->length);
+ 
+ 	return 0;
+diff -up nfs-utils-1.3.0/utils/gssd/context_lucid.c.orig nfs-utils-1.3.0/utils/gssd/context_lucid.c
+--- nfs-utils-1.3.0/utils/gssd/context_lucid.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/context_lucid.c	2016-04-15 11:42:38.367938385 -0400
+@@ -206,7 +206,7 @@ prepare_krb5_rfc4121_buffer(gss_krb5_luc
+ 	if (WRITE_BYTES(&p, end, lctx->send_seq)) goto out_err;
+ 
+ 	/* Protocol 0 here implies DES3 or RC4 */
+-	printerr(2, "%s: protocol %d\n", __FUNCTION__, lctx->protocol);
++	printerr(4, "%s: protocol %d\n", __FUNCTION__, lctx->protocol);
+ 	if (lctx->protocol == 0) {
+ 		enctype = lctx->rfc1964_kd.ctx_key.type;
+ 		keysize = lctx->rfc1964_kd.ctx_key.length;
+@@ -219,7 +219,7 @@ prepare_krb5_rfc4121_buffer(gss_krb5_luc
+ 			keysize = lctx->cfx_kd.ctx_key.length;
+ 		}
+ 	}
+-	printerr(2, "%s: serializing key with enctype %d and size %d\n",
++	printerr(4, "%s: serializing key with enctype %d and size %d\n",
+ 		 __FUNCTION__, enctype, keysize);
+ 
+ 	if (WRITE_BYTES(&p, end, enctype)) goto out_err;
+@@ -265,7 +265,7 @@ serialize_krb5_ctx(gss_ctx_id_t *ctx, gs
+ 	gss_krb5_lucid_context_v1_t *lctx = 0;
+ 	int retcode = 0;
+ 
+-	printerr(2, "DEBUG: %s: lucid version!\n", __FUNCTION__);
++	printerr(4, "DEBUG: %s: lucid version!\n", __FUNCTION__);
+ 	maj_stat = gss_export_lucid_sec_context(&min_stat, ctx,
+ 						1, &return_ctx);
+ 	if (maj_stat != GSS_S_COMPLETE) {
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.c.orig nfs-utils-1.3.0/utils/gssd/gssd.c
+--- nfs-utils-1.3.0/utils/gssd/gssd.c.orig	2016-04-15 11:42:13.917460638 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.c	2016-04-15 11:42:38.369938424 -0400
+@@ -1,7 +1,7 @@
+ /*
+   gssd.c
+ 
+-  Copyright (c) 2000 The Regents of the University of Michigan.
++  Copyright (c) 2000, 2004 The Regents of the University of Michigan.
+   All rights reserved.
+ 
+   Copyright (c) 2000 Dug Song <dugsong@UMICH.EDU>.
+@@ -40,9 +40,18 @@
+ #include <config.h>
+ #endif	/* HAVE_CONFIG_H */
+ 
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
+ #include <sys/param.h>
+ #include <sys/socket.h>
++#include <sys/time.h>
++#include <sys/resource.h>
++#include <sys/inotify.h>
+ #include <rpc/rpc.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
+ 
+ #include <unistd.h>
+ #include <err.h>
+@@ -51,41 +60,684 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <signal.h>
++#include <memory.h>
++#include <fcntl.h>
++#include <dirent.h>
++#include <netdb.h>
++#include <event.h>
++
+ #include "gssd.h"
+ #include "err_util.h"
+ #include "gss_util.h"
+ #include "krb5_util.h"
+ #include "nfslib.h"
+ 
+-char pipefs_dir[PATH_MAX] = GSSD_PIPEFS_DIR;
+-char keytabfile[PATH_MAX] = GSSD_DEFAULT_KEYTAB_FILE;
+-char ccachedir[PATH_MAX] = GSSD_DEFAULT_CRED_DIR ":" GSSD_USER_CRED_DIR;
+-char *ccachesearch[GSSD_MAX_CCACHE_SEARCH + 1];
++static char *pipefs_path = GSSD_PIPEFS_DIR;
++static DIR *pipefs_dir;
++static int pipefs_fd;
++static int inotify_fd;
++struct event inotify_ev;
++
++char *keytabfile = GSSD_DEFAULT_KEYTAB_FILE;
++char **ccachesearch;
+ int  use_memcache = 0;
+ int  root_uses_machine_creds = 1;
+ unsigned int  context_timeout = 0;
+ unsigned int  rpc_timeout = 5;
+ char *preferred_realm = NULL;
+-int pipefds[2] = { -1, -1 };
++/* Avoid DNS reverse lookups on server names */
++static bool avoid_dns = true;
++
++
++TAILQ_HEAD(topdir_list_head, topdir) topdir_list;
++
++struct topdir {
++	TAILQ_ENTRY(topdir) list;
++	TAILQ_HEAD(clnt_list_head, clnt_info) clnt_list;
++	int wd;
++	char name[];
++};
++
++/*
++ * topdir_list:
++ *	linked list of struct topdir with basic data about a topdir.
++ *
++ * clnt_list:
++ *      linked list of struct clnt_info with basic data about a clntXXX dir,
++ *      one per topdir.
++ *
++ * Directory structure: created by the kernel
++ *      {rpc_pipefs}/{topdir}/clntXX      : one per rpc_clnt struct in the kernel
++ *      {rpc_pipefs}/{topdir}/clntXX/krb5 : read uid for which kernel wants
++ *					    a context, write the resulting context
++ *      {rpc_pipefs}/{topdir}/clntXX/info : stores info such as server name
++ *      {rpc_pipefs}/{topdir}/clntXX/gssd : pipe for all gss mechanisms using
++ *					    a text-based string of parameters
++ *
++ * Algorithm:
++ *      Poll all {rpc_pipefs}/{topdir}/clntXX/YYYY files.  When data is ready,
++ *      read and process; performs rpcsec_gss context initialization protocol to
++ *      get a cred for that user.  Writes result to corresponding krb5 file
++ *      in a form the kernel code will understand.
++ *      In addition, we make sure we are notified whenever anything is
++ *      created or destroyed in {rpc_pipefs} or in any of the clntXX directories,
++ *      and rescan the whole {rpc_pipefs} when this happens.
++ */
++
++/*
++ * convert a presentation address string to a sockaddr_storage struct. Returns
++ * true on success or false on failure.
++ *
++ * Note that we do not populate the sin6_scope_id field here for IPv6 addrs.
++ * gssd nececessarily relies on hostname resolution and DNS AAAA records
++ * do not generally contain scope-id's. This means that GSSAPI auth really
++ * can't work with IPv6 link-local addresses.
++ *
++ * We *could* consider changing this if we did something like adopt the
++ * Microsoft "standard" of using the ipv6-literal.net domainname, but it's
++ * not really feasible at present.
++ */
++static bool
++gssd_addrstr_to_sockaddr(struct sockaddr *sa, const char *node, const char *port)
++{
++	int rc;
++	struct addrinfo *res;
++	struct addrinfo hints = { .ai_flags = AI_NUMERICHOST | AI_NUMERICSERV };
++
++#ifndef IPV6_SUPPORTED
++	hints.ai_family = AF_INET;
++#endif /* IPV6_SUPPORTED */
++
++	rc = getaddrinfo(node, port, &hints, &res);
++	if (rc) {
++		printerr(0, "ERROR: unable to convert %s|%s to sockaddr: %s\n",
++			 node, port,
++			 rc == EAI_SYSTEM ? strerror(errno) : gai_strerror(rc));
++		return false;
++	}
++
++#ifdef IPV6_SUPPORTED
++	/*
++	 * getnameinfo ignores the scopeid. If the address turns out to have
++	 * a non-zero scopeid, we can't use it -- the resolved host might be
++	 * completely different from the one intended.
++	 */
++	if (res->ai_addr->sa_family == AF_INET6) {
++		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)res->ai_addr;
++		if (sin6->sin6_scope_id) {
++			printerr(0, "ERROR: address %s has non-zero "
++				    "sin6_scope_id!\n", node);
++			freeaddrinfo(res);
++			return false;
++		}
++	}
++#endif /* IPV6_SUPPORTED */
++
++	memcpy(sa, res->ai_addr, res->ai_addrlen);
++	freeaddrinfo(res);
++	return true;
++}
++
++/*
++ * convert a sockaddr to a hostname
++ */
++static char *
++gssd_get_servername(const char *name, const struct sockaddr *sa, const char *addr)
++{
++	socklen_t		addrlen;
++	int			err;
++	char			hbuf[NI_MAXHOST];
++	unsigned char		buf[sizeof(struct in6_addr)];
++
++	while (avoid_dns) {
++		/*
++		 * Determine if this is a server name, or an IP address.
++		 * If it is an IP address, do the DNS lookup otherwise
++		 * skip the DNS lookup.
++		 */
++		if (strchr(name, '.') == NULL)
++			break; /* local name */
++		else if (inet_pton(AF_INET, name, buf) == 1)
++			break; /* IPv4 address */
++		else if (inet_pton(AF_INET6, name, buf) == 1)
++			break; /* IPv6 addrss */
++
++		return strdup(name);
++	}
++
++	switch (sa->sa_family) {
++	case AF_INET:
++		addrlen = sizeof(struct sockaddr_in);
++		break;
++#ifdef IPV6_SUPPORTED
++	case AF_INET6:
++		addrlen = sizeof(struct sockaddr_in6);
++		break;
++#endif /* IPV6_SUPPORTED */
++	default:
++		printerr(0, "ERROR: unrecognized addr family %d\n",
++			 sa->sa_family);
++		return NULL;
++	}
++
++	err = getnameinfo(sa, addrlen, hbuf, sizeof(hbuf), NULL, 0,
++			  NI_NAMEREQD);
++	if (err) {
++		printerr(0, "ERROR: unable to resolve %s to hostname: %s\n",
++			 addr, err == EAI_SYSTEM ? strerror(errno) :
++						   gai_strerror(err));
++		return NULL;
++	}
++
++	return strdup(hbuf);
++}
++
++static void
++gssd_read_service_info(int dirfd, struct clnt_info *clp)
++{
++	int fd;
++	FILE *info = NULL;
++	int numfields;
++	char *server = NULL;
++	char *service = NULL;
++	int program;
++	int version;
++	char *address = NULL;
++	char *protoname = NULL;
++	char *port = NULL;
++	char *servername = NULL;
++
++	fd = openat(dirfd, "info", O_RDONLY);
++	if (fd < 0) {
++		printerr(0, "ERROR: can't open %s/info: %s\n",
++			 clp->relpath, strerror(errno));
++		goto fail;
++	}
++
++	info = fdopen(fd, "r");
++	if (!info) {
++		printerr(0, "ERROR: can't fdopen %s/info: %s\n",
++			 clp->relpath, strerror(errno));
++		close(fd);
++		goto fail;
++	}
++
++	/*
++	 * Some history:
++	 *
++	 * The first three lines were added with rpc_pipefs in 2003-01-13.
++	 * (commit af2f003391786fb632889c02142c941b212ba4ff)
++	 * 
++	 * The 'protocol' line was added in 2003-06-11.
++	 * (commit 9bd741ae48785d0c0e75cf906ff66f893d600c2d)
++	 *
++	 * The 'port' line was added in 2007-09-26.
++	 * (commit bf19aacecbeebccb2c3d150a8bd9416b7dba81fe)
++	 */
++	numfields = fscanf(info,
++			   "RPC server: %ms\n"
++			   "service: %ms (%d) version %d\n"
++			   "address: %ms\n"
++			   "protocol: %ms\n"
++			   "port: %ms\n",
++			   &server,
++			   &service, &program, &version,
++			   &address,
++			   &protoname,
++			   &port);
++
++
++	switch (numfields) {
++	case 5:
++		protoname = strdup("tcp");
++		if (!protoname)
++			goto fail;
++		/* fall through */
++	case 6:
++		/* fall through */
++	case 7:
++		break;
++	default:
++		goto fail;
++	}
++
++	if (!gssd_addrstr_to_sockaddr((struct sockaddr *)&clp->addr,
++				 address, port ? port : ""))
++		goto fail;
++
++	servername = gssd_get_servername(server, (struct sockaddr *)&clp->addr, address);
++	if (!servername)
++		goto fail;
++
++	if (asprintf(&clp->servicename, "%s@%s", service, servername) < 0)
++		goto fail;
++
++	clp->servername = servername;
++	clp->prog = program;
++	clp->vers = version;
++	clp->protocol = protoname;
++
++	goto out;
++
++fail:
++	printerr(0, "ERROR: failed to parse %s/info\n", clp->relpath);
++	free(servername);
++	free(protoname);
++	clp->servicename = NULL;
++	clp->servername = NULL;
++	clp->prog = 0;
++	clp->vers = 0;
++	clp->protocol = NULL;
++out:
++	if (info)
++		fclose(info);
++
++	free(server);
++	free(service);
++	free(address);
++	free(port);
++}
++
++static void
++gssd_destroy_client(struct clnt_info *clp)
++{
++	if (clp->krb5_fd >= 0) {
++		close(clp->krb5_fd);
++		event_del(&clp->krb5_ev);
++	}
++
++	if (clp->gssd_fd >= 0) {
++		close(clp->gssd_fd);
++		event_del(&clp->gssd_ev);
++	}
++
++	inotify_rm_watch(inotify_fd, clp->wd);
++	free(clp->relpath);
++	free(clp->servicename);
++	free(clp->servername);
++	free(clp->protocol);
++	free(clp);
++}
++
++static void gssd_scan(void);
++
++static void
++gssd_clnt_gssd_cb(int UNUSED(fd), short UNUSED(which), void *data)
++{
++	struct clnt_info *clp = data;
++
++	handle_gssd_upcall(clp);
++}
++
++static void
++gssd_clnt_krb5_cb(int UNUSED(fd), short UNUSED(which), void *data)
++{
++	struct clnt_info *clp = data;
++
++	handle_krb5_upcall(clp);
++}
++
++static struct clnt_info *
++gssd_get_clnt(struct topdir *tdi, const char *name)
++{
++	struct clnt_info *clp;
++
++	TAILQ_FOREACH(clp, &tdi->clnt_list, list)
++		if (!strcmp(clp->name, name))
++			return clp;
++
++	clp = calloc(1, sizeof(struct clnt_info));
++	if (!clp) {
++		printerr(0, "ERROR: can't malloc clnt_info: %s\n",
++			 strerror(errno));
++		return NULL;
++	}
++
++	if (asprintf(&clp->relpath, "%s/%s", tdi->name, name) < 0) {
++		clp->relpath = NULL;
++		goto out;
++	}
++
++	clp->wd = inotify_add_watch(inotify_fd, clp->relpath, IN_CREATE | IN_DELETE);
++	if (clp->wd < 0) {
++		if (errno != ENOENT)
++			printerr(0, "ERROR: inotify_add_watch failed for %s: %s\n",
++			 	clp->relpath, strerror(errno));
++		goto out;
++	}
++
++	clp->name = clp->relpath + strlen(tdi->name) + 1;
++	clp->krb5_fd = -1;
++	clp->gssd_fd = -1;
++
++	TAILQ_INSERT_HEAD(&tdi->clnt_list, clp, list);
++	return clp;
++
++out:
++	free(clp->relpath);
++	free(clp);
++	return NULL;
++}
++
++static int
++gssd_scan_clnt(struct clnt_info *clp)
++{
++	int clntfd;
++	bool gssd_was_closed;
++	bool krb5_was_closed;
++
++	gssd_was_closed = clp->gssd_fd < 0 ? true : false;
++	krb5_was_closed = clp->krb5_fd < 0 ? true : false;
++
++	clntfd = openat(pipefs_fd, clp->relpath, O_RDONLY);
++	if (clntfd < 0) {
++		printerr(0, "ERROR: can't openat %s: %s\n",
++			 clp->relpath, strerror(errno));
++		return -1;
++	}
++
++	if (clp->gssd_fd == -1)
++		clp->gssd_fd = openat(clntfd, "gssd", O_RDWR | O_NONBLOCK);
++
++	if (clp->gssd_fd == -1 && clp->krb5_fd == -1)
++		clp->krb5_fd = openat(clntfd, "krb5", O_RDWR | O_NONBLOCK);
++
++	if (gssd_was_closed && clp->gssd_fd >= 0) {
++		event_set(&clp->gssd_ev, clp->gssd_fd, EV_READ | EV_PERSIST,
++			  gssd_clnt_gssd_cb, clp);
++		event_add(&clp->gssd_ev, NULL);
++	}
++
++	if (krb5_was_closed && clp->krb5_fd >= 0) {
++		event_set(&clp->krb5_ev, clp->krb5_fd, EV_READ | EV_PERSIST,
++			  gssd_clnt_krb5_cb, clp);
++		event_add(&clp->krb5_ev, NULL);
++	}
++
++	if (clp->krb5_fd == -1 && clp->gssd_fd == -1)
++		/* not fatal, files might appear later */
++		goto out;
++
++	if (clp->prog == 0)
++		gssd_read_service_info(clntfd, clp);
++
++out:
++	close(clntfd);
++	clp->scanned = true;
++	return 0;
++}
++
++static int
++gssd_create_clnt(struct topdir *tdi, const char *name)
++{
++	struct clnt_info *clp;
++
++	clp = gssd_get_clnt(tdi, name);
++	if (!clp)
++		return -1;
++
++	return gssd_scan_clnt(clp);
++}
+ 
+-void
++static struct topdir *
++gssd_get_topdir(const char *name)
++{
++	struct topdir *tdi;
++
++	TAILQ_FOREACH(tdi, &topdir_list, list)
++		if (!strcmp(tdi->name, name))
++			return tdi;
++
++	tdi = malloc(sizeof(*tdi) + strlen(name) + 1);
++	if (!tdi) {
++		printerr(0, "ERROR: Couldn't allocate struct topdir\n");
++		return NULL;
++	}
++
++	tdi->wd = inotify_add_watch(inotify_fd, name, IN_CREATE);
++	if (tdi->wd < 0) {
++		printerr(0, "ERROR: inotify_add_watch failed for top dir %s: %s\n",
++			 tdi->name, strerror(errno));
++		free(tdi);
++		return NULL;
++	}
++
++	strcpy(tdi->name, name);
++	TAILQ_INIT(&tdi->clnt_list);
++
++	TAILQ_INSERT_HEAD(&topdir_list, tdi, list);
++	return tdi;
++}
++
++static void
++gssd_scan_topdir(const char *name)
++{
++	struct topdir *tdi;
++	int dfd;
++	DIR *dir;
++	struct clnt_info *clp;
++	struct dirent *d;
++
++	tdi = gssd_get_topdir(name);
++	if (!tdi)
++		return;
++
++	dfd = openat(pipefs_fd, tdi->name, O_RDONLY);
++	if (dfd < 0) {
++		printerr(0, "ERROR: can't openat %s: %s\n",
++			 tdi->name, strerror(errno));
++		return;
++	}
++
++	dir = fdopendir(dfd);
++	if (!dir) {
++		printerr(0, "ERROR: can't fdopendir %s: %s\n",
++			 tdi->name, strerror(errno));
++		return;
++	}
++
++	TAILQ_FOREACH(clp, &tdi->clnt_list, list)
++		clp->scanned = false;
++
++	while ((d = readdir(dir))) {
++		if (d->d_type != DT_DIR)
++			continue;
++
++		if (strncmp(d->d_name, "clnt", strlen("clnt")))
++			continue;
++
++		gssd_create_clnt(tdi, d->d_name);
++	}
++
++	closedir(dir);
++
++	TAILQ_FOREACH(clp, &tdi->clnt_list, list) {
++		void *saveprev;
++
++		if (clp->scanned)
++			continue;
++
++		printerr(3, "destroying client %s\n", clp->relpath);
++		saveprev = clp->list.tqe_prev;
++		TAILQ_REMOVE(&tdi->clnt_list, clp, list);
++		gssd_destroy_client(clp);
++		clp = saveprev;
++	}
++}
++
++static void
++gssd_scan(void)
++{
++	struct dirent *d;
++
++	printerr(3, "doing a full rescan\n");
++	rewinddir(pipefs_dir);
++
++	while ((d = readdir(pipefs_dir))) {
++		if (d->d_type != DT_DIR)
++			continue;
++
++		if (d->d_name[0] == '.')
++			continue;
++
++		gssd_scan_topdir(d->d_name);
++	}
++
++	if (TAILQ_EMPTY(&topdir_list)) {
++		printerr(0, "ERROR: the rpc_pipefs directory is empty!\n");
++		exit(EXIT_FAILURE);
++	}
++}
++
++static void
++gssd_scan_cb(int UNUSED(fd), short UNUSED(which), void *UNUSED(data))
++{
++	gssd_scan();
++}
++
++static bool
++gssd_inotify_topdir(struct topdir *tdi, const struct inotify_event *ev)
++{
++	printerr(5, "inotify event for topdir (%s) - "
++		 "ev->wd (%d) ev->name (%s) ev->mask (0x%08x)\n",
++		 tdi->name, ev->wd, ev->len > 0 ? ev->name : "<?>", ev->mask);
++
++	if (ev->mask & IN_IGNORED) {
++		printerr(0, "ERROR: topdir disappeared!\n");
++		return false;
++	}
++
++	if (ev->len == 0)
++		return false;
++
++	if (ev->mask & IN_CREATE) {
++		if (!(ev->mask & IN_ISDIR))
++			return true;
++
++		if (strncmp(ev->name, "clnt", strlen("clnt")))
++			return true;
++
++		if (gssd_create_clnt(tdi, ev->name))
++			return false;
++
++		return true;
++	} 
++
++	return false;
++}
++
++static bool
++gssd_inotify_clnt(struct topdir *tdi, struct clnt_info *clp, const struct inotify_event *ev)
++{
++	printerr(5, "inotify event for clntdir (%s) - "
++		 "ev->wd (%d) ev->name (%s) ev->mask (0x%08x)\n",
++		 clp->relpath, ev->wd, ev->len > 0 ? ev->name : "<?>", ev->mask);
++
++	if (ev->mask & IN_IGNORED) {
++		TAILQ_REMOVE(&tdi->clnt_list, clp, list);
++		gssd_destroy_client(clp);
++		return true;
++	}
++
++	if (ev->len == 0)
++		return false;
++
++	if (ev->mask & IN_CREATE) {
++		if (!strcmp(ev->name, "gssd") ||
++		    !strcmp(ev->name, "krb5") ||
++		    !strcmp(ev->name, "info"))
++			if (gssd_scan_clnt(clp))
++				return false;
++
++		return true;
++
++	} else if (ev->mask & IN_DELETE) {
++		if (!strcmp(ev->name, "gssd") && clp->gssd_fd >= 0) {
++			close(clp->gssd_fd);
++			event_del(&clp->gssd_ev);
++			clp->gssd_fd = -1;
++
++		} else if (!strcmp(ev->name, "krb5") && clp->krb5_fd >= 0) {
++			close(clp->krb5_fd);
++			event_del(&clp->krb5_ev);
++			clp->krb5_fd = -1;
++		}
++
++		return true;
++	}
++
++	return false;
++}
++
++static void
++gssd_inotify_cb(int ifd, short UNUSED(which), void *UNUSED(data))
++{
++	bool rescan = false;
++	struct topdir *tdi;
++	struct clnt_info *clp;
++
++	while (true) {
++		char buf[4096] __attribute__ ((aligned(__alignof__(struct inotify_event))));
++		const struct inotify_event *ev;
++		ssize_t len;
++		char *ptr;
++
++		len = read(ifd, buf, sizeof(buf));
++		if (len == -1 && errno == EINTR)
++			continue;
++
++		if (len <= 0)
++			break;
++
++		for (ptr = buf; ptr < buf + len;
++		     ptr += sizeof(struct inotify_event) + ev->len) {
++			ev = (const struct inotify_event *)ptr;
++
++			if (ev->mask & IN_Q_OVERFLOW) {
++				printerr(0, "ERROR: inotify queue overflow\n");
++				rescan = true;
++				break;
++			}
++
++			TAILQ_FOREACH(tdi, &topdir_list, list) {
++				if (tdi->wd == ev->wd) {
++					if (!gssd_inotify_topdir(tdi, ev))
++						rescan = true;
++					goto found;
++				}
++
++				TAILQ_FOREACH(clp, &tdi->clnt_list, list) {
++					if (clp->wd == ev->wd) {
++						if (!gssd_inotify_clnt(tdi, clp, ev))
++							rescan = true;
++						goto found;
++					}
++				}
++			}
++
++found:
++			if (!tdi) {
++				printerr(5, "inotify event for unknown wd!!! - "
++					 "ev->wd (%d) ev->name (%s) ev->mask (0x%08x)\n",
++					 ev->wd, ev->len > 0 ? ev->name : "<?>", ev->mask);
++				rescan = true;
++			}
++		}
++	}
++
++	if (rescan)
++		gssd_scan();
++}
++
++static void
+ sig_die(int signal)
+ {
+-	/* destroy krb5 machine creds */
+ 	if (root_uses_machine_creds)
+ 		gssd_destroy_krb5_machine_creds();
+ 	printerr(1, "exiting on signal %d\n", signal);
+ 	exit(0);
+ }
+ 
+-void
+-sig_hup(int signal)
+-{
+-	/* don't exit on SIGHUP */
+-	printerr(1, "Received SIGHUP(%d)... Ignoring.\n", signal);
+-	return;
+-}
+-
+ static void
+ usage(char *progname)
+ {
+@@ -104,8 +756,9 @@ main(int argc, char *argv[])
+ 	int i;
+ 	extern char *optarg;
+ 	char *progname;
++	char *ccachedir = NULL;
++	struct event sighup_ev;
+ 
+-	memset(ccachesearch, 0, sizeof(ccachesearch));
+ 	while ((opt = getopt(argc, argv, "DfvrlmnMp:k:d:t:T:R:")) != -1) {
+ 		switch (opt) {
+ 			case 'f':
+@@ -127,19 +780,13 @@ main(int argc, char *argv[])
+ 				rpc_verbosity++;
+ 				break;
+ 			case 'p':
+-				strncpy(pipefs_dir, optarg, sizeof(pipefs_dir));
+-				if (pipefs_dir[sizeof(pipefs_dir)-1] != '\0')
+-					errx(1, "pipefs path name too long");
++				pipefs_path = optarg;
+ 				break;
+ 			case 'k':
+-				strncpy(keytabfile, optarg, sizeof(keytabfile));
+-				if (keytabfile[sizeof(keytabfile)-1] != '\0')
+-					errx(1, "keytab path name too long");
++				keytabfile = optarg;
+ 				break;
+ 			case 'd':
+-				strncpy(ccachedir, optarg, sizeof(ccachedir));
+-				if (ccachedir[sizeof(ccachedir)-1] != '\0')
+-					errx(1, "ccachedir path name too long");
++				ccachedir = optarg;
+ 				break;
+ 			case 't':
+ 				context_timeout = atoi(optarg);
+@@ -158,7 +805,7 @@ main(int argc, char *argv[])
+ #endif
+ 				break;
+ 			case 'D':
+-				avoid_dns = 0;
++				avoid_dns = false;
+ 				break;
+ 			default:
+ 				usage(argv[0]);
+@@ -174,15 +821,41 @@ main(int argc, char *argv[])
+ 	 * the results of getpw*.
+ 	 */
+ 	if (setenv("HOME", "/", 1)) {
+-		printerr(1, "Unable to set $HOME: %s\n", strerror(errno));
++		printerr(0, "gssd: Unable to set $HOME: %s\n", strerror(errno));
+ 		exit(1);
+ 	}
+ 
+-	i = 0;
+-	ccachesearch[i++] = strtok(ccachedir, ":");
+-	do {
+-		ccachesearch[i++] = strtok(NULL, ":");
+-	} while (ccachesearch[i-1] != NULL && i < GSSD_MAX_CCACHE_SEARCH);
++	if (ccachedir) {
++		char *ccachedir_copy;
++		char *ptr;
++
++		for (ptr = ccachedir, i = 2; *ptr; ptr++)
++			if (*ptr == ':')
++				i++;
++
++		ccachesearch = malloc(i * sizeof(char *));
++	       	ccachedir_copy = strdup(ccachedir);
++		if (!ccachedir_copy || !ccachesearch) {
++			printerr(0, "malloc failure\n");
++			exit(EXIT_FAILURE);
++		}
++
++		i = 0;
++		ccachesearch[i++] = strtok(ccachedir, ":");
++		while(ccachesearch[i - 1])
++			ccachesearch[i++] = strtok(NULL, ":");
++
++	} else {
++		ccachesearch = malloc(3 * sizeof(char *));
++		if (!ccachesearch) {
++			printerr(0, "malloc failure\n");
++			exit(EXIT_FAILURE);
++		}
++
++		ccachesearch[0] = GSSD_DEFAULT_CRED_DIR;
++		ccachesearch[1] = GSSD_USER_CRED_DIR;
++		ccachesearch[2] = NULL;
++	}
+ 
+ 	if (preferred_realm == NULL)
+ 		gssd_k5_get_default_realm(&preferred_realm);
+@@ -197,6 +870,13 @@ main(int argc, char *argv[])
+ 	if (verbosity && rpc_verbosity == 0)
+ 		rpc_verbosity = verbosity;
+ 	authgss_set_debug_level(rpc_verbosity);
++#elif HAVE_LIBTIRPC_SET_DEBUG
++	/*
++	 * Only set the libtirpc debug level if explicitly requested via -r...
++	 * gssd is chatty enough as it is.
++	 */
++	if (rpc_verbosity > 0)
++		libtirpc_set_debug(progname, rpc_verbosity, fg);
+ #else
+         if (rpc_verbosity > 0)
+ 		printerr(0, "Warning: rpcsec_gss library does not "
+@@ -206,14 +886,42 @@ main(int argc, char *argv[])
+ 	if (gssd_check_mechs() != 0)
+ 		errx(1, "Problem with gssapi library");
+ 
+-	if (!fg)
+-		mydaemon(0, 0, pipefds);
++	daemon_init(fg);
++
++	event_init();
++
++	pipefs_dir = opendir(pipefs_path);
++	if (!pipefs_dir) {
++		printerr(0, "ERROR: opendir(%s) failed: %s\n", pipefs_path, strerror(errno));
++		exit(EXIT_FAILURE);
++	}
++
++	pipefs_fd = dirfd(pipefs_dir);
++	if (fchdir(pipefs_fd)) {
++		printerr(0, "ERROR: fchdir(%s) failed: %s\n", pipefs_path, strerror(errno));
++		exit(EXIT_FAILURE);
++	}
++
++	inotify_fd = inotify_init1(IN_NONBLOCK);
++	if (inotify_fd == -1) {
++		printerr(0, "ERROR: inotify_init1 failed: %s\n", strerror(errno));
++		exit(EXIT_FAILURE);
++	}
+ 
+ 	signal(SIGINT, sig_die);
+ 	signal(SIGTERM, sig_die);
+-	signal(SIGHUP, sig_hup);
++	signal_set(&sighup_ev, SIGHUP, gssd_scan_cb, NULL);
++	signal_add(&sighup_ev, NULL);
++	event_set(&inotify_ev, inotify_fd, EV_READ | EV_PERSIST, gssd_inotify_cb, NULL);
++	event_add(&inotify_ev, NULL);
++
++	TAILQ_INIT(&topdir_list);
++	gssd_scan();
++	daemon_ready();
+ 
+-	gssd_run();
+-	printerr(0, "gssd_run returned!\n");
+-	abort();
++	event_dispatch();
++
++	printerr(0, "ERROR: event_dispatch() returned!\n");
++	return EXIT_FAILURE;
+ }
++
+diff -up nfs-utils-1.3.0/utils/gssd/gssd.h.orig nfs-utils-1.3.0/utils/gssd/gssd.h
+--- nfs-utils-1.3.0/utils/gssd/gssd.h.orig	2016-04-15 11:42:13.917460638 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd.h	2016-04-15 11:42:38.369938424 -0400
+@@ -34,14 +34,12 @@
+ #include <sys/types.h>
+ #include <sys/queue.h>
+ #include <gssapi/gssapi.h>
++#include <event.h>
++#include <stdbool.h>
+ 
+-#define MAX_FILE_NAMELEN	32
+-#define FD_ALLOC_BLOCK		256
+ #ifndef GSSD_PIPEFS_DIR
+ #define GSSD_PIPEFS_DIR		"/var/lib/nfs/rpc_pipefs"
+ #endif
+-#define INFO			"info"
+-#define KRB5			"krb5"
+ #define DNOTIFY_SIGNAL		(SIGRTMIN + 3)
+ 
+ #define GSSD_DEFAULT_CRED_DIR			"/tmp"
+@@ -50,60 +48,40 @@
+ #define GSSD_DEFAULT_MACHINE_CRED_SUFFIX	"machine"
+ #define GSSD_DEFAULT_KEYTAB_FILE		"/etc/krb5.keytab"
+ #define GSSD_SERVICE_NAME			"nfs"
+-#define GSSD_SERVICE_NAME_LEN			3
+-#define GSSD_MAX_CCACHE_SEARCH			16
+ 
+ /*
+  * The gss mechanisms that we can handle
+  */
+ enum {AUTHTYPE_KRB5, AUTHTYPE_LIPKEY};
+ 
+-
+-
+-extern char			pipefs_dir[PATH_MAX];
+-extern char			keytabfile[PATH_MAX];
+-extern char			*ccachesearch[];
++extern char		       *keytabfile;
++extern char		      **ccachesearch;
+ extern int			use_memcache;
+ extern int			root_uses_machine_creds;
+ extern unsigned int 		context_timeout;
+ extern unsigned int rpc_timeout;
+ extern char			*preferred_realm;
+-extern int			pipefds[2];
+-
+-TAILQ_HEAD(clnt_list_head, clnt_info) clnt_list;
+ 
+ struct clnt_info {
+ 	TAILQ_ENTRY(clnt_info)	list;
+-	char			*dirname;
+-	char			*pdir;
+-	int			dir_fd;
++	int			wd;
++	bool			scanned;
++	char			*name;
++	char			*relpath;
+ 	char			*servicename;
+ 	char			*servername;
+ 	int			prog;
+ 	int			vers;
+ 	char			*protocol;
+ 	int			krb5_fd;
+-	int			krb5_poll_index;
+-	int			krb5_close_me;
+-	int                     gssd_fd;
+-	int                     gssd_poll_index;
+-	int			gssd_close_me;
+-	struct sockaddr_storage addr;
+-};
+-
+-TAILQ_HEAD(topdirs_list_head, topdirs_info) topdirs_list;
+-
+-struct topdirs_info {
+-	TAILQ_ENTRY(topdirs_info)   list;
+-	char			*dirname;
+-	int			fd;
++	struct event		krb5_ev;
++	int			gssd_fd;
++	struct event		gssd_ev;
++	struct			sockaddr_storage addr;
+ };
+ 
+-void init_client_list(void);
+-int update_client_list(void);
+ void handle_krb5_upcall(struct clnt_info *clp);
+ void handle_gssd_upcall(struct clnt_info *clp);
+-void gssd_run(void);
+ 
+ 
+ #endif /* _RPC_GSSD_H_ */
+diff -up nfs-utils-1.3.0/utils/gssd/gssd_proc.c.orig nfs-utils-1.3.0/utils/gssd/gssd_proc.c
+--- nfs-utils-1.3.0/utils/gssd/gssd_proc.c.orig	2016-04-15 11:42:13.949461263 -0400
++++ nfs-utils-1.3.0/utils/gssd/gssd_proc.c	2016-04-15 11:42:38.371938463 -0400
+@@ -9,6 +9,7 @@
+   Copyright (c) 2002 Marius Aamodt Eriksen <marius@UMICH.EDU>.
+   Copyright (c) 2002 Bruce Fields <bfields@UMICH.EDU>
+   Copyright (c) 2004 Kevin Coffman <kwc@umich.edu>
++  Copyright (c) 2014 David H?rdeman <david@hardeman.nu>
+   All rights reserved, all wrongs reversed.
+ 
+   Redistribution and use in source and binary forms, with or without
+@@ -52,7 +53,6 @@
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <sys/fsuid.h>
+-#include <sys/resource.h>
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -79,548 +79,6 @@
+ #include "nfslib.h"
+ #include "gss_names.h"
+ 
+-/*
+- * pollarray:
+- *      array of struct pollfd suitable to pass to poll. initialized to
+- *      zero - a zero struct is ignored by poll() because the events mask is 0.
+- *
+- * clnt_list:
+- *      linked list of struct clnt_info which associates a clntXXX directory
+- *	with an index into pollarray[], and other basic data about that client.
+- *
+- * Directory structure: created by the kernel
+- *      {rpc_pipefs}/{dir}/clntXX         : one per rpc_clnt struct in the kernel
+- *      {rpc_pipefs}/{dir}/clntXX/krb5    : read uid for which kernel wants
+- *					    a context, write the resulting context
+- *      {rpc_pipefs}/{dir}/clntXX/info    : stores info such as server name
+- *      {rpc_pipefs}/{dir}/clntXX/gssd    : pipe for all gss mechanisms using
+- *					    a text-based string of parameters
+- *
+- * Algorithm:
+- *      Poll all {rpc_pipefs}/{dir}/clntXX/YYYY files.  When data is ready,
+- *      read and process; performs rpcsec_gss context initialization protocol to
+- *      get a cred for that user.  Writes result to corresponding krb5 file
+- *      in a form the kernel code will understand.
+- *      In addition, we make sure we are notified whenever anything is
+- *      created or destroyed in {rpc_pipefs} or in any of the clntXX directories,
+- *      and rescan the whole {rpc_pipefs} when this happens.
+- */
+-
+-struct pollfd * pollarray;
+-
+-unsigned long pollsize;  /* the size of pollaray (in pollfd's) */
+-
+-/* Avoid DNS reverse lookups on server names */
+-int avoid_dns = 1;
+-
+-/*
+- * convert a presentation address string to a sockaddr_storage struct. Returns
+- * true on success or false on failure.
+- *
+- * Note that we do not populate the sin6_scope_id field here for IPv6 addrs.
+- * gssd nececessarily relies on hostname resolution and DNS AAAA records
+- * do not generally contain scope-id's. This means that GSSAPI auth really
+- * can't work with IPv6 link-local addresses.
+- *
+- * We *could* consider changing this if we did something like adopt the
+- * Microsoft "standard" of using the ipv6-literal.net domainname, but it's
+- * not really feasible at present.
+- */
+-static int
+-addrstr_to_sockaddr(struct sockaddr *sa, const char *node, const char *port)
+-{
+-	int rc;
+-	struct addrinfo *res;
+-	struct addrinfo hints = { .ai_flags = AI_NUMERICHOST | AI_NUMERICSERV };
+-
+-#ifndef IPV6_SUPPORTED
+-	hints.ai_family = AF_INET;
+-#endif /* IPV6_SUPPORTED */
+-
+-	rc = getaddrinfo(node, port, &hints, &res);
+-	if (rc) {
+-		printerr(0, "ERROR: unable to convert %s|%s to sockaddr: %s\n",
+-			 node, port, rc == EAI_SYSTEM ? strerror(errno) :
+-						gai_strerror(rc));
+-		return 0;
+-	}
+-
+-#ifdef IPV6_SUPPORTED
+-	/*
+-	 * getnameinfo ignores the scopeid. If the address turns out to have
+-	 * a non-zero scopeid, we can't use it -- the resolved host might be
+-	 * completely different from the one intended.
+-	 */
+-	if (res->ai_addr->sa_family == AF_INET6) {
+-		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)res->ai_addr;
+-		if (sin6->sin6_scope_id) {
+-			printerr(0, "ERROR: address %s has non-zero "
+-				    "sin6_scope_id!\n", node);
+-			freeaddrinfo(res);
+-			return 0;
+-		}
+-	}
+-#endif /* IPV6_SUPPORTED */
+-
+-	memcpy(sa, res->ai_addr, res->ai_addrlen);
+-	freeaddrinfo(res);
+-	return 1;
+-}
+-
+-/*
+- * convert a sockaddr to a hostname
+- */
+-static char *
+-get_servername(const char *name, const struct sockaddr *sa, const char *addr)
+-{
+-	socklen_t		addrlen;
+-	int			err;
+-	char			*hostname;
+-	char			hbuf[NI_MAXHOST];
+-	unsigned char		buf[sizeof(struct in6_addr)];
+-
+-	if (avoid_dns) {
+-		/*
+-		 * Determine if this is a server name, or an IP address.
+-		 * If it is an IP address, do the DNS lookup otherwise
+-		 * skip the DNS lookup.
+-		 */
+-		int is_fqdn = 1;
+-		if (strchr(name, '.') == NULL)
+-			is_fqdn = 0; /* local name */
+-		else if (inet_pton(AF_INET, name, buf) == 1)
+-			is_fqdn = 0; /* IPv4 address */
+-		else if (inet_pton(AF_INET6, name, buf) == 1)
+-			is_fqdn = 0; /* IPv6 addrss */
+-
+-		if (is_fqdn) {
+-			return strdup(name);
+-		}
+-		/* Sorry, cannot avoid dns after all */
+-	}
+-
+-	switch (sa->sa_family) {
+-	case AF_INET:
+-		addrlen = sizeof(struct sockaddr_in);
+-		break;
+-#ifdef IPV6_SUPPORTED
+-	case AF_INET6:
+-		addrlen = sizeof(struct sockaddr_in6);
+-		break;
+-#endif /* IPV6_SUPPORTED */
+-	default:
+-		printerr(0, "ERROR: unrecognized addr family %d\n",
+-			 sa->sa_family);
+-		return NULL;
+-	}
+-
+-	err = getnameinfo(sa, addrlen, hbuf, sizeof(hbuf), NULL, 0,
+-			  NI_NAMEREQD);
+-	if (err) {
+-		printerr(0, "ERROR: unable to resolve %s to hostname: %s\n",
+-			 addr, err == EAI_SYSTEM ? strerror(errno) :
+-						   gai_strerror(err));
+-		return NULL;
+-	}
+-
+-	hostname = strdup(hbuf);
+-
+-	return hostname;
+-}
+-
+-/* XXX buffer problems: */
+-static int
+-read_service_info(char *info_file_name, char **servicename, char **servername,
+-		  int *prog, int *vers, char **protocol,
+-		  struct sockaddr *addr) {
+-#define INFOBUFLEN 256
+-	char		buf[INFOBUFLEN + 1];
+-	static char	server[128];
+-	int		nbytes;
+-	static char	service[128];
+-	static char	address[128];
+-	char		program[16];
+-	char		version[16];
+-	char		protoname[16];
+-	char		port[128];
+-	char		*p;
+-	int		fd = -1;
+-	int		numfields;
+-
+-	*servicename = *servername = *protocol = NULL;
+-
+-	if ((fd = open(info_file_name, O_RDONLY)) == -1) {
+-		printerr(0, "ERROR: can't open %s: %s\n", info_file_name,
+-			 strerror(errno));
+-		goto fail;
+-	}
+-	if ((nbytes = read(fd, buf, INFOBUFLEN)) == -1)
+-		goto fail;
+-	close(fd);
+-	fd = -1;
+-	buf[nbytes] = '\0';
+-
+-	numfields = sscanf(buf,"RPC server: %127s\n"
+-		   "service: %127s %15s version %15s\n"
+-		   "address: %127s\n"
+-		   "protocol: %15s\n",
+-		   server,
+-		   service, program, version,
+-		   address,
+-		   protoname);
+-
+-	if (numfields == 5) {
+-		strcpy(protoname, "tcp");
+-	} else if (numfields != 6) {
+-		goto fail;
+-	}
+-
+-	port[0] = '\0';
+-	if ((p = strstr(buf, "port")) != NULL)
+-		sscanf(p, "port: %127s\n", port);
+-
+-	/* get program, and version numbers */
+-	*prog = atoi(program + 1); /* skip open paren */
+-	*vers = atoi(version);
+-
+-	if (!addrstr_to_sockaddr(addr, address, port))
+-		goto fail;
+-
+-	*servername = get_servername(server, addr, address);
+-	if (*servername == NULL)
+-		goto fail;
+-
+-	nbytes = snprintf(buf, INFOBUFLEN, "%s@%s", service, *servername);
+-	if (nbytes > INFOBUFLEN)
+-		goto fail;
+-
+-	if (!(*servicename = calloc(strlen(buf) + 1, 1)))
+-		goto fail;
+-	memcpy(*servicename, buf, strlen(buf));
+-
+-	if (!(*protocol = strdup(protoname)))
+-		goto fail;
+-	return 0;
+-fail:
+-	printerr(0, "ERROR: failed to read service info\n");
+-	if (fd != -1) close(fd);
+-	free(*servername);
+-	free(*servicename);
+-	free(*protocol);
+-	*servicename = *servername = *protocol = NULL;
+-	return -1;
+-}
+-
+-static void
+-destroy_client(struct clnt_info *clp)
+-{
+-	if (clp->krb5_poll_index != -1)
+-		memset(&pollarray[clp->krb5_poll_index], 0,
+-					sizeof(struct pollfd));
+-	if (clp->gssd_poll_index != -1)
+-		memset(&pollarray[clp->gssd_poll_index], 0,
+-					sizeof(struct pollfd));
+-	if (clp->dir_fd != -1) close(clp->dir_fd);
+-	if (clp->krb5_fd != -1) close(clp->krb5_fd);
+-	if (clp->gssd_fd != -1) close(clp->gssd_fd);
+-	free(clp->dirname);
+-	free(clp->pdir);
+-	free(clp->servicename);
+-	free(clp->servername);
+-	free(clp->protocol);
+-	free(clp);
+-}
+-
+-static struct clnt_info *
+-insert_new_clnt(void)
+-{
+-	struct clnt_info	*clp = NULL;
+-
+-	if (!(clp = (struct clnt_info *)calloc(1,sizeof(struct clnt_info)))) {
+-		printerr(0, "ERROR: can't malloc clnt_info: %s\n",
+-			 strerror(errno));
+-		goto out;
+-	}
+-	clp->krb5_poll_index = -1;
+-	clp->gssd_poll_index = -1;
+-	clp->krb5_fd = -1;
+-	clp->gssd_fd = -1;
+-	clp->dir_fd = -1;
+-
+-	TAILQ_INSERT_HEAD(&clnt_list, clp, list);
+-out:
+-	return clp;
+-}
+-
+-static int
+-process_clnt_dir_files(struct clnt_info * clp)
+-{
+-	char	name[PATH_MAX];
+-	char	gname[PATH_MAX];
+-	char	info_file_name[PATH_MAX];
+-
+-	if (clp->gssd_close_me) {
+-		printerr(2, "Closing 'gssd' pipe for %s\n", clp->dirname);
+-		close(clp->gssd_fd);
+-		memset(&pollarray[clp->gssd_poll_index], 0,
+-			sizeof(struct pollfd));
+-		clp->gssd_fd = -1;
+-		clp->gssd_poll_index = -1;
+-		clp->gssd_close_me = 0;
+-	}
+-	if (clp->krb5_close_me) {
+-		printerr(2, "Closing 'krb5' pipe for %s\n", clp->dirname);
+-		close(clp->krb5_fd);
+-		memset(&pollarray[clp->krb5_poll_index], 0,
+-			sizeof(struct pollfd));
+-		clp->krb5_fd = -1;
+-		clp->krb5_poll_index = -1;
+-		clp->krb5_close_me = 0;
+-	}
+-
+-	if (clp->gssd_fd == -1) {
+-		snprintf(gname, sizeof(gname), "%s/gssd", clp->dirname);
+-		clp->gssd_fd = open(gname, O_RDWR);
+-	}
+-	if (clp->gssd_fd == -1) {
+-		if (clp->krb5_fd == -1) {
+-			snprintf(name, sizeof(name), "%s/krb5", clp->dirname);
+-			clp->krb5_fd = open(name, O_RDWR);
+-		}
+-
+-		/* If we opened a gss-specific pipe, let's try opening
+-		 * the new upcall pipe again. If we succeed, close
+-		 * gss-specific pipe(s).
+-		 */
+-		if (clp->krb5_fd != -1) {
+-			clp->gssd_fd = open(gname, O_RDWR);
+-			if (clp->gssd_fd != -1) {
+-				if (clp->krb5_fd != -1)
+-					close(clp->krb5_fd);
+-				clp->krb5_fd = -1;
+-			}
+-		}
+-	}
+-
+-	if ((clp->krb5_fd == -1) && (clp->gssd_fd == -1))
+-		return -1;
+-	snprintf(info_file_name, sizeof(info_file_name), "%s/info",
+-			clp->dirname);
+-	if (clp->prog == 0)
+-		read_service_info(info_file_name, &clp->servicename,
+-				  &clp->servername, &clp->prog, &clp->vers,
+-				  &clp->protocol, (struct sockaddr *) &clp->addr);
+-	return 0;
+-}
+-
+-static int
+-get_poll_index(int *ind)
+-{
+-	unsigned int i;
+-
+-	*ind = -1;
+-	for (i=0; i<pollsize; i++) {
+-		if (pollarray[i].events == 0) {
+-			*ind = i;
+-			break;
+-		}
+-	}
+-	if (*ind == -1) {
+-		printerr(0, "ERROR: No pollarray slots open\n");
+-		return -1;
+-	}
+-	return 0;
+-}
+-
+-
+-static int
+-insert_clnt_poll(struct clnt_info *clp)
+-{
+-	if ((clp->gssd_fd != -1) && (clp->gssd_poll_index == -1)) {
+-		if (get_poll_index(&clp->gssd_poll_index)) {
+-			printerr(0, "ERROR: Too many gssd clients\n");
+-			return -1;
+-		}
+-		pollarray[clp->gssd_poll_index].fd = clp->gssd_fd;
+-		pollarray[clp->gssd_poll_index].events |= POLLIN;
+-	}
+-
+-	if ((clp->krb5_fd != -1) && (clp->krb5_poll_index == -1)) {
+-		if (get_poll_index(&clp->krb5_poll_index)) {
+-			printerr(0, "ERROR: Too many krb5 clients\n");
+-			return -1;
+-		}
+-		pollarray[clp->krb5_poll_index].fd = clp->krb5_fd;
+-		pollarray[clp->krb5_poll_index].events |= POLLIN;
+-	}
+-
+-	return 0;
+-}
+-
+-static void
+-process_clnt_dir(char *dir, char *pdir)
+-{
+-	struct clnt_info *	clp;
+-
+-	if (!(clp = insert_new_clnt()))
+-		goto fail_destroy_client;
+-
+-	if (!(clp->pdir = strdup(pdir)))
+-		goto fail_destroy_client;
+-
+-	/* An extra for the '/', and an extra for the null */
+-	if (!(clp->dirname = calloc(strlen(dir) + strlen(pdir) + 2, 1))) {
+-		goto fail_destroy_client;
+-	}
+-	sprintf(clp->dirname, "%s/%s", pdir, dir);
+-	if ((clp->dir_fd = open(clp->dirname, O_RDONLY)) == -1) {
+-		if (errno != ENOENT)
+-			printerr(0, "ERROR: can't open %s: %s\n",
+-				 clp->dirname, strerror(errno));
+-		goto fail_destroy_client;
+-	}
+-	fcntl(clp->dir_fd, F_SETSIG, DNOTIFY_SIGNAL);
+-	fcntl(clp->dir_fd, F_NOTIFY, DN_CREATE | DN_DELETE | DN_MULTISHOT);
+-
+-	if (process_clnt_dir_files(clp))
+-		goto fail_keep_client;
+-
+-	if (insert_clnt_poll(clp))
+-		goto fail_destroy_client;
+-
+-	return;
+-
+-fail_destroy_client:
+-	if (clp) {
+-		TAILQ_REMOVE(&clnt_list, clp, list);
+-		destroy_client(clp);
+-	}
+-fail_keep_client:
+-	/* We couldn't find some subdirectories, but we keep the client
+-	 * around in case we get a notification on the directory when the
+-	 * subdirectories are created. */
+-	return;
+-}
+-
+-void
+-init_client_list(void)
+-{
+-	struct rlimit rlim;
+-	TAILQ_INIT(&clnt_list);
+-	/* Eventually plan to grow/shrink poll array: */
+-	pollsize = FD_ALLOC_BLOCK;
+-	if (getrlimit(RLIMIT_NOFILE, &rlim) == 0 &&
+-	    rlim.rlim_cur != RLIM_INFINITY)
+-		pollsize = rlim.rlim_cur;
+-	pollarray = calloc(pollsize, sizeof(struct pollfd));
+-}
+-
+-/*
+- * This is run after a DNOTIFY signal, and should clear up any
+- * directories that are no longer around, and re-scan any existing
+- * directories, since the DNOTIFY could have been in there.
+- */
+-static void
+-update_old_clients(struct dirent **namelist, int size, char *pdir)
+-{
+-	struct clnt_info *clp;
+-	void *saveprev;
+-	int i, stillhere;
+-	char fname[PATH_MAX];
+-
+-	for (clp = clnt_list.tqh_first; clp != NULL; clp = clp->list.tqe_next) {
+-		/* only compare entries in the global list that are from the
+-		 * same pipefs parent directory as "pdir"
+-		 */
+-		if (strcmp(clp->pdir, pdir) != 0) continue;
+-
+-		stillhere = 0;
+-		for (i=0; i < size; i++) {
+-			snprintf(fname, sizeof(fname), "%s/%s",
+-				 pdir, namelist[i]->d_name);
+-			if (strcmp(clp->dirname, fname) == 0) {
+-				stillhere = 1;
+-				break;
+-			}
+-		}
+-		if (!stillhere) {
+-			printerr(2, "destroying client %s\n", clp->dirname);
+-			saveprev = clp->list.tqe_prev;
+-			TAILQ_REMOVE(&clnt_list, clp, list);
+-			destroy_client(clp);
+-			clp = saveprev;
+-		}
+-	}
+-	for (clp = clnt_list.tqh_first; clp != NULL; clp = clp->list.tqe_next) {
+-		if (!process_clnt_dir_files(clp))
+-			insert_clnt_poll(clp);
+-	}
+-}
+-
+-/* Search for a client by directory name, return 1 if found, 0 otherwise */
+-static int
+-find_client(char *dirname, char *pdir)
+-{
+-	struct clnt_info	*clp;
+-	char fname[PATH_MAX];
+-
+-	for (clp = clnt_list.tqh_first; clp != NULL; clp = clp->list.tqe_next) {
+-		snprintf(fname, sizeof(fname), "%s/%s", pdir, dirname);
+-		if (strcmp(clp->dirname, fname) == 0)
+-			return 1;
+-	}
+-	return 0;
+-}
+-
+-static int
+-process_pipedir(char *pipe_name)
+-{
+-	struct dirent **namelist;
+-	int i, j;
+-
+-	if (chdir(pipe_name) < 0) {
+-		printerr(0, "ERROR: can't chdir to %s: %s\n",
+-			 pipe_name, strerror(errno));
+-		return -1;
+-	}
+-
+-	j = scandir(pipe_name, &namelist, NULL, alphasort);
+-	if (j < 0) {
+-		printerr(0, "ERROR: can't scandir %s: %s\n",
+-			 pipe_name, strerror(errno));
+-		return -1;
+-	}
+-
+-	update_old_clients(namelist, j, pipe_name);
+-	for (i=0; i < j; i++) {
+-		if (!strncmp(namelist[i]->d_name, "clnt", 4)
+-		    && !find_client(namelist[i]->d_name, pipe_name))
+-			process_clnt_dir(namelist[i]->d_name, pipe_name);
+-		free(namelist[i]);
+-	}
+-
+-	free(namelist);
+-
+-	return 0;
+-}
+-
+-/* Used to read (and re-read) list of clients, set up poll array. */
+-int
+-update_client_list(void)
+-{
+-	int retval = -1;
+-	struct topdirs_info *tdi;
+-
+-	TAILQ_FOREACH(tdi, &topdirs_list, list) {
+-		retval = process_pipedir(tdi->dirname);
+-		if (retval)
+-			printerr(1, "WARNING: error processing %s\n",
+-				 tdi->dirname);
+-
+-	}
+-	return retval;
+-}
+-
+ /* Encryption types supported by the kernel rpcsec_gss code */
+ int num_krb5_enctypes = 0;
+ krb5_enctype *krb5_enctypes = NULL;
+@@ -691,7 +149,7 @@ do_downcall(int k5_fd, uid_t uid, struct
+ 	unsigned int timeout = context_timeout;
+ 	unsigned int buf_size = 0;
+ 
+-	printerr(1, "doing downcall: lifetime_rec=%u acceptor=%.*s\n",
++	printerr(2, "doing downcall: lifetime_rec=%u acceptor=%.*s\n",
+ 		lifetime_rec, acceptor->length, acceptor->value);
+ 	buf_size = sizeof(uid) + sizeof(timeout) + sizeof(pd->pd_seq_win) +
+ 		sizeof(pd->pd_ctx_hndl.length) + pd->pd_ctx_hndl.length +
+@@ -730,7 +188,7 @@ do_error_downcall(int k5_fd, uid_t uid,
+ 	unsigned int timeout = 0;
+ 	int	zero = 0;
+ 
+-	printerr(1, "doing error downcall\n");
++	printerr(2, "doing error downcall\n");
+ 
+ 	if (WRITE_BYTES(&p, end, uid)) goto out_err;
+ 	if (WRITE_BYTES(&p, end, timeout)) goto out_err;
+@@ -772,7 +230,7 @@ populate_port(struct sockaddr *sa, const
+ 	switch (sa->sa_family) {
+ 	case AF_INET:
+ 		if (s4->sin_port != 0) {
+-			printerr(2, "DEBUG: port already set to %d\n",
++			printerr(4, "DEBUG: port already set to %d\n",
+ 				 ntohs(s4->sin_port));
+ 			return 1;
+ 		}
+@@ -780,7 +238,7 @@ populate_port(struct sockaddr *sa, const
+ #ifdef IPV6_SUPPORTED
+ 	case AF_INET6:
+ 		if (s6->sin6_port != 0) {
+-			printerr(2, "DEBUG: port already set to %d\n",
++			printerr(4, "DEBUG: port already set to %d\n",
+ 				 ntohs(s6->sin6_port));
+ 			return 1;
+ 		}
+@@ -941,7 +399,7 @@ create_auth_rpc_client(struct clnt_info
+ 	auth = authgss_create_default(rpc_clnt, tgtname, &sec);
+ 	if (!auth) {
+ 		/* Our caller should print appropriate message */
+-		printerr(2, "WARNING: Failed to create krb5 context for "
++		printerr(1, "WARNING: Failed to create krb5 context for "
+ 			    "user with uid %d for server %s\n",
+ 			 uid, tgtname);
+ 		goto out_fail;
+@@ -1032,7 +490,7 @@ krb5_not_machine_creds(struct clnt_info
+ 	char		**dname;
+ 	int		err, resp = -1;
+ 
+-	printerr(1, "krb5_not_machine_creds: uid %d tgtname %s\n", 
++	printerr(2, "krb5_not_machine_creds: uid %d tgtname %s\n", 
+ 		uid, tgtname);
+ 
+ 	*chg_err = change_identity(uid);
+@@ -1079,7 +537,7 @@ krb5_use_machine_creds(struct clnt_info
+ 	int	nocache = 0;
+ 	int	success = 0;
+ 
+-	printerr(1, "krb5_use_machine_creds: uid %d tgtname %s\n", 
++	printerr(2, "krb5_use_machine_creds: uid %d tgtname %s\n", 
+ 		uid, tgtname);
+ 
+ 	do {
+@@ -1149,8 +607,6 @@ process_krb5_upcall(struct clnt_info *cl
+ 	gss_OID			mech;
+ 	gss_buffer_desc		acceptor  = {0};
+ 
+-	printerr(1, "handling krb5 upcall (%s)\n", clp->dirname);
+-
+ 	token.length = 0;
+ 	token.value = NULL;
+ 	memset(&pd, 0, sizeof(struct authgss_private_data));
+@@ -1176,8 +632,6 @@ process_krb5_upcall(struct clnt_info *cl
+ 	 * used for this case is not important.
+ 	 *
+ 	 */
+-	printerr(2, "%s: service is '%s'\n", __func__,
+-		 service ? service : "<null>");
+ 	if (uid != 0 || (uid == 0 && root_uses_machine_creds == 0 &&
+ 				service == NULL)) {
+ 
+@@ -1191,7 +645,7 @@ process_krb5_upcall(struct clnt_info *cl
+ 			/* Child: fall through to rest of function */
+ 			childpid = getpid();
+ 			unsetenv("KRB5CCNAME");
+-			printerr(1, "CHILD forked pid %d \n", childpid);
++			printerr(2, "CHILD forked pid %d \n", childpid);
+ 			break;
+ 		case -1:
+ 			/* fork() failed! */
+@@ -1224,9 +678,7 @@ no_fork:
+ 			if (auth == NULL)
+ 				goto out_return_error;
+ 		} else {
+-			printerr(1, "WARNING: Failed to create krb5 context "
+-				 "for user with uid %d for server %s\n",
+-				 uid, clp->servername);
++			/* krb5_not_machine_creds logs the error */
+ 			goto out_return_error;
+ 		}
+ 	}
+@@ -1257,7 +709,7 @@ no_fork:
+ 	 * try to use it after this point.
+ 	 */
+ 	if (serialize_context_for_kernel(&pd.pd_ctx, &token, &krb5oid, NULL)) {
+-		printerr(0, "WARNING: Failed to serialize krb5 context for "
++		printerr(1, "WARNING: Failed to serialize krb5 context for "
+ 			    "user with uid %d for server %s\n",
+ 			 uid, clp->servername);
+ 		goto out_return_error;
+@@ -1300,6 +752,8 @@ handle_krb5_upcall(struct clnt_info *clp
+ 		return;
+ 	}
+ 
++	printerr(2, "\n%s: uid %d (%s)\n", __func__, uid, clp->relpath);
++
+ 	process_krb5_upcall(clp, uid, clp->krb5_fd, NULL, NULL);
+ }
+ 
+@@ -1311,85 +765,66 @@ handle_gssd_upcall(struct clnt_info *clp
+ 	int			lbuflen = 0;
+ 	char			*p;
+ 	char			*mech = NULL;
++	char			*uidstr = NULL;
+ 	char			*target = NULL;
+ 	char			*service = NULL;
+ 	char			*enctypes = NULL;
+ 
+-	printerr(1, "handling gssd upcall (%s)\n", clp->dirname);
+-
+ 	if (readline(clp->gssd_fd, &lbuf, &lbuflen) != 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed reading request\n");
+ 		return;
+ 	}
+-	printerr(2, "%s: '%s'\n", __func__, lbuf);
+ 
+-	/* find the mechanism name */
+-	if ((p = strstr(lbuf, "mech=")) != NULL) {
+-		mech = malloc(lbuflen);
+-		if (!mech)
+-			goto out;
+-		if (sscanf(p, "mech=%s", mech) != 1) {
+-			printerr(0, "WARNING: handle_gssd_upcall: "
+-				    "failed to parse gss mechanism name "
+-				    "in upcall string '%s'\n", lbuf);
+-			goto out;
+-		}
+-	} else {
++	printerr(2, "\n%s: '%s' (%s)\n", __func__, lbuf, clp->relpath);
++
++	for (p = strtok(lbuf, " "); p; p = strtok(NULL, " ")) {
++		if (!strncmp(p, "mech=", strlen("mech=")))
++			mech = p + strlen("mech=");
++		else if (!strncmp(p, "uid=", strlen("uid=")))
++			uidstr = p + strlen("uid=");
++		else if (!strncmp(p, "enctypes=", strlen("enctypes=")))
++			enctypes = p + strlen("enctypes=");
++		else if (!strncmp(p, "target=", strlen("target=")))
++			target = p + strlen("target=");
++		else if (!strncmp(p, "service=", strlen("service=")))
++			service = p + strlen("service=");
++	}
++
++	if (!mech || strlen(mech) < 1) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed to find gss mechanism name "
+ 			    "in upcall string '%s'\n", lbuf);
+-		goto out;
++		return;
+ 	}
+ 
+-	/* read uid */
+-	if ((p = strstr(lbuf, "uid=")) != NULL) {
+-		if (sscanf(p, "uid=%d", &uid) != 1) {
+-			printerr(0, "WARNING: handle_gssd_upcall: "
+-				    "failed to parse uid "
+-				    "in upcall string '%s'\n", lbuf);
+-			goto out;
+-		}
+-	} else {
++	if (uidstr) {
++		uid = (uid_t)strtol(uidstr, &p, 10);
++		if (p == uidstr || *p != '\0')
++			uidstr = NULL;
++	}
++
++	if (!uidstr) {
+ 		printerr(0, "WARNING: handle_gssd_upcall: "
+ 			    "failed to find uid "
+ 			    "in upcall string '%s'\n", lbuf);
+-		goto out;
++		return;
+ 	}
+ 
+-	/* read supported encryption types if supplied */
+-	if ((p = strstr(lbuf, "enctypes=")) != NULL) {
+-		enctypes = malloc(lbuflen);
+-		if (!enctypes)
+-			goto out;
+-		if (sscanf(p, "enctypes=%s", enctypes) != 1) {
+-			printerr(0, "WARNING: handle_gssd_upcall: "
+-				    "failed to parse encryption types "
+-				    "in upcall string '%s'\n", lbuf);
+-			goto out;
+-		}
+-		if (parse_enctypes(enctypes) != 0) {
+-			printerr(0, "WARNING: handle_gssd_upcall: "
+-				"parsing encryption types failed: errno %d\n", errno);
+-		}
++	if (enctypes && parse_enctypes(enctypes) != 0) {
++		printerr(0, "WARNING: handle_gssd_upcall: "
++			 "parsing encryption types failed: errno %d\n", errno);
++		return;
+ 	}
+ 
+-	/* read target name */
+-	if ((p = strstr(lbuf, "target=")) != NULL) {
+-		target = malloc(lbuflen);
+-		if (!target)
+-			goto out;
+-		if (sscanf(p, "target=%s", target) != 1) {
+-			printerr(0, "WARNING: handle_gssd_upcall: "
+-				    "failed to parse target name "
+-				    "in upcall string '%s'\n", lbuf);
+-			goto out;
+-		}
++	if (target && strlen(target) < 1) {
++		printerr(0, "WARNING: handle_gssd_upcall: "
++			 "failed to parse target name "
++			 "in upcall string '%s'\n", lbuf);
++		return;
+ 	}
+ 
+ 	/*
+-	 * read the service name
+-	 *
+ 	 * The presence of attribute "service=" indicates that machine
+ 	 * credentials should be used for this request.  If the value
+ 	 * is "*", then any machine credentials available can be used.
+@@ -1397,16 +832,11 @@ handle_gssd_upcall(struct clnt_info *clp
+ 	 * the specified service name (always "nfs" for now) should be
+ 	 * used.
+ 	 */
+-	if ((p = strstr(lbuf, "service=")) != NULL) {
+-		service = malloc(lbuflen);
+-		if (!service)
+-			goto out;
+-		if (sscanf(p, "service=%s", service) != 1) {
+-			printerr(0, "WARNING: handle_gssd_upcall: "
+-				    "failed to parse service type "
+-				    "in upcall string '%s'\n", lbuf);
+-			goto out;
+-		}
++	if (service && strlen(service) < 1) {
++		printerr(0, "WARNING: handle_gssd_upcall: "
++			 "failed to parse service type "
++			 "in upcall string '%s'\n", lbuf);
++		return;
+ 	}
+ 
+ 	if (strcmp(mech, "krb5") == 0 && clp->servername)
+@@ -1417,13 +847,5 @@ handle_gssd_upcall(struct clnt_info *clp
+ 				 "received unknown gss mech '%s'\n", mech);
+ 		do_error_downcall(clp->gssd_fd, uid, -EACCES);
+ 	}
+-
+-out:
+-	free(lbuf);
+-	free(mech);
+-	free(enctypes);
+-	free(target);
+-	free(service);
+-	return;
+ }
+ 
+diff -up nfs-utils-1.3.0/utils/gssd/gss_util.h.orig nfs-utils-1.3.0/utils/gssd/gss_util.h
+--- nfs-utils-1.3.0/utils/gssd/gss_util.h.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/gss_util.h	2016-04-15 11:42:38.368938404 -0400
+@@ -52,6 +52,4 @@ int gssd_check_mechs(void);
+ 		gss_krb5_set_allowable_enctypes(min, cred, num, types)
+ #endif
+ 
+-extern int avoid_dns;
+-
+ #endif /* _GSS_UTIL_H_ */
+diff -up nfs-utils-1.3.0/utils/gssd/krb5_util.c.orig nfs-utils-1.3.0/utils/gssd/krb5_util.c
+--- nfs-utils-1.3.0/utils/gssd/krb5_util.c.orig	2016-04-15 11:42:13.953461341 -0400
++++ nfs-utils-1.3.0/utils/gssd/krb5_util.c	2016-04-15 11:42:38.372938482 -0400
+@@ -356,7 +356,7 @@ gssd_get_single_krb5_cred(krb5_context c
+ 	 */
+ 	now += 300;
+ 	if (ple->ccname && ple->endtime > now && !nocache) {
+-		printerr(2, "INFO: Credentials in CC '%s' are good until %d\n",
++		printerr(3, "INFO: Credentials in CC '%s' are good until %d\n",
+ 			 ple->ccname, ple->endtime);
+ 		code = 0;
+ 		goto out;
+@@ -383,7 +383,7 @@ gssd_get_single_krb5_cred(krb5_context c
+ 			 "tickets.  May have problems behind a NAT.\n");
+ #ifdef TEST_SHORT_LIFETIME
+ 	/* set a short lifetime (for debugging only!) */
+-	printerr(0, "WARNING: Using (debug) short machine cred lifetime!\n");
++	printerr(1, "WARNING: Using (debug) short machine cred lifetime!\n");
+ 	krb5_get_init_creds_opt_set_tkt_life(init_opts, 5*60);
+ #endif
+ 	opts = init_opts;
+@@ -451,8 +451,7 @@ gssd_get_single_krb5_cred(krb5_context c
+ 	}
+ 
+ 	code = 0;
+-	printerr(2, "Successfully obtained machine credentials for "
+-		 "principal '%s' stored in ccache '%s'\n", pname, cc_name);
++	printerr(2, "%s: principal '%s' ccache:'%s'\n", __func__, pname, cc_name);
+   out:
+ #if HAVE_KRB5_GET_INIT_CREDS_OPT_SET_ADDRESSLESS
+ 	if (init_opts)
+@@ -477,7 +476,7 @@ gssd_set_krb5_ccache_name(char *ccname)
+ #ifdef USE_GSS_KRB5_CCACHE_NAME
+ 	u_int	maj_stat, min_stat;
+ 
+-	printerr(2, "using gss_krb5_ccache_name to select krb5 ccache %s\n",
++	printerr(3, "using gss_krb5_ccache_name to select krb5 ccache %s\n",
+ 		 ccname);
+ 	maj_stat = gss_krb5_ccache_name(&min_stat, ccname, NULL);
+ 	if (maj_stat != GSS_S_COMPLETE) {
+@@ -492,7 +491,7 @@ gssd_set_krb5_ccache_name(char *ccname)
+ 	 * function above for which there is no generic gssapi
+ 	 * equivalent.)
+ 	 */
+-	printerr(2, "using environment variable to select krb5 ccache %s\n",
++	printerr(3, "using environment variable to select krb5 ccache %s\n",
+ 		 ccname);
+ 	setenv("KRB5CCNAME", ccname, 1);
+ #endif
+@@ -1093,8 +1092,8 @@ gssd_setup_krb5_user_gss_ccache(uid_t ui
+ 	struct dirent		*d;
+ 	int			err, i, j;
+ 
+-	printerr(2, "getting credentials for client with uid %u for "
+-		    "server %s\n", uid, servername);
++	printerr(3, "looking for client creds with uid %u for "
++		    "server %s in %s\n", uid, servername, dirpattern);
+ 
+ 	for (i = 0, j = 0; dirpattern[i] != '\0'; i++) {
+ 		switch (dirpattern[i]) {
+@@ -1410,16 +1409,21 @@ gssd_acquire_krb5_cred(gss_cred_id_t *gs
+ int
+ gssd_acquire_user_cred(gss_cred_id_t *gss_cred)
+ {
+-	OM_uint32 min_stat;
++	OM_uint32 maj_stat, min_stat;
+ 	int ret;
+ 
+ 	ret = gssd_acquire_krb5_cred(gss_cred);
+ 
+ 	/* force validation of cred to check for expiry */
+ 	if (ret == 0) {
+-		if (gss_inquire_cred(&min_stat, *gss_cred, NULL, NULL,
+-				     NULL, NULL) != GSS_S_COMPLETE)
+-			ret = -1;
++		maj_stat = gss_inquire_cred(&min_stat, *gss_cred, 
++			NULL, NULL, NULL, NULL);
++		if (maj_stat != GSS_S_COMPLETE) {
++			if (get_verbosity() > 0)
++				pgsserr("gss_inquire_cred",
++					maj_stat, min_stat, &krb5oid);
++				ret = -1;
++			}
+ 	}
+ 
+ 	return ret;
+diff -up nfs-utils-1.3.0/utils/gssd/Makefile.am.orig nfs-utils-1.3.0/utils/gssd/Makefile.am
+--- nfs-utils-1.3.0/utils/gssd/Makefile.am.orig	2016-04-15 11:42:13.942461126 -0400
++++ nfs-utils-1.3.0/utils/gssd/Makefile.am	2016-04-15 11:42:38.367938385 -0400
+@@ -29,7 +29,6 @@ COMMON_SRCS = \
+ gssd_SOURCES = \
+ 	$(COMMON_SRCS) \
+ 	gssd.c \
+-	gssd_main_loop.c \
+ 	gssd_proc.c \
+ 	krb5_util.c \
+ 	\
+@@ -37,12 +36,23 @@ gssd_SOURCES = \
+ 	krb5_util.h \
+ 	write_bytes.h
+ 
+-gssd_LDADD =	../../support/nfs/libnfs.a \
+-		$(RPCSECGSS_LIBS) $(KRBLIBS) $(GSSAPI_LIBS)
+-gssd_LDFLAGS = $(KRBLDFLAGS) $(LIBTIRPC)
++gssd_LDADD = \
++	../../support/nfs/libnfs.a \
++	$(LIBEVENT) \
++	$(RPCSECGSS_LIBS) \
++	$(KRBLIBS) \
++	$(GSSAPI_LIBS) \
++	$(LIBTIRPC)
+ 
+-gssd_CFLAGS = $(AM_CFLAGS) $(CFLAGS) \
+-	      $(RPCSECGSS_CFLAGS) $(KRBCFLAGS) $(GSSAPI_CFLAGS)
++gssd_LDFLAGS = \
++	$(KRBLDFLAGS)
++
++gssd_CFLAGS = \
++	$(AM_CFLAGS) \
++	$(CFLAGS) \
++	$(RPCSECGSS_CFLAGS) \
++	$(KRBCFLAGS) \
++	$(GSSAPI_CFLAGS)
+ 
+ svcgssd_SOURCES = \
+ 	$(COMMON_SRCS) \
+diff -up nfs-utils-1.3.0/utils/gssd/svcgssd.c.orig nfs-utils-1.3.0/utils/gssd/svcgssd.c
+--- nfs-utils-1.3.0/utils/gssd/svcgssd.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/gssd/svcgssd.c	2016-04-15 11:42:38.372938482 -0400
+@@ -62,8 +62,6 @@
+ #include "gss_util.h"
+ #include "err_util.h"
+ 
+-static int pipefds[2] = { -1, -1 };
+-
+ void
+ sig_die(int signal)
+ {
+@@ -137,6 +135,13 @@ main(int argc, char *argv[])
+ 	if (verbosity && rpc_verbosity == 0)
+ 		rpc_verbosity = verbosity;
+ 	authgss_set_debug_level(rpc_verbosity);
++#elif HAVE_LIBTIRPC_SET_DEBUG
++        /*
++	 * Only set the libtirpc debug level if explicitly requested via -r...
++	 * svcgssd is chatty enough as it is.
++	 */
++        if (rpc_verbosity > 0)
++                libtirpc_set_debug(progname, rpc_verbosity, fg);
+ #else
+ 	if (rpc_verbosity > 0)
+ 		printerr(0, "Warning: rpcsec_gss library does not "
+@@ -157,8 +162,7 @@ main(int argc, char *argv[])
+ 		exit(1);
+ 	}
+ 
+-	if (!fg)
+-		mydaemon(0, 0, pipefds);
++	daemon_init(fg);
+ 
+ 	signal(SIGINT, sig_die);
+ 	signal(SIGTERM, sig_die);
+@@ -187,8 +191,7 @@ main(int argc, char *argv[])
+ 		}
+ 	}
+ 
+-	if (!fg)
+-		release_parent(pipefds);
++	daemon_ready();
+ 
+ 	nfs4_init_name_mapping(NULL); /* XXX: should only do this once */
+ 	gssd_run();
+diff -up nfs-utils-1.3.0/utils/idmapd/idmapd.c.orig nfs-utils-1.3.0/utils/idmapd/idmapd.c
+--- nfs-utils-1.3.0/utils/idmapd/idmapd.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/idmapd/idmapd.c	2016-04-15 11:42:38.373938502 -0400
+@@ -164,7 +164,6 @@ static char pipefsdir[PATH_MAX];
+ static char *nobodyuser, *nobodygroup;
+ static uid_t nobodyuid;
+ static gid_t nobodygid;
+-static int pipefds[2] = { -1, -1 };
+ 
+ /* Used by conffile.c in libnfs.a */
+ char *conf_path;
+@@ -302,8 +301,7 @@ main(int argc, char **argv)
+ 	if (nfs4_init_name_mapping(conf_path))
+ 		errx(1, "Unable to create name to user id mappings.");
+ 
+-	if (!fg)
+-		mydaemon(0, 0, pipefds);
++	daemon_init(fg);
+ 
+ 	event_init();
+ 
+@@ -380,7 +378,7 @@ main(int argc, char **argv)
+ 	if (nfsdret != 0 && fd == 0)
+ 		xlog_err("main: Neither NFS client nor NFSd found");
+ 
+-	release_parent(pipefds);
++	daemon_ready();
+ 
+ 	if (event_dispatch() < 0)
+ 		xlog_err("main: event_dispatch returns errno %d (%s)",
+diff -up nfs-utils-1.3.0/utils/statd/statd.c.orig nfs-utils-1.3.0/utils/statd/statd.c
+--- nfs-utils-1.3.0/utils/statd/statd.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/statd/statd.c	2016-04-15 11:42:38.373938502 -0400
+@@ -248,13 +248,12 @@ int main (int argc, char **argv)
+ 	int nlm_udp = 0, nlm_tcp = 0;
+ 	struct rlimit rlim;
+ 
+-	int pipefds[2] = { -1, -1};
+-	char status;
+-
+ 	/* Default: daemon mode, no other options */
+ 	run_mode = 0;
+-	xlog_stderr(0);
+-	xlog_syslog(1);
++
++	/* Log to stderr if there's an error during startup */
++	xlog_stderr(1);
++	xlog_syslog(0);
+ 
+ 	/* Set the basename */
+ 	if ((name_p = strrchr(argv[0],'/')) != NULL) {
+@@ -394,52 +393,17 @@ int main (int argc, char **argv)
+ 		simulator (--argc, ++argv);	/* simulator() does exit() */
+ #endif
+ 
+-	if (!(run_mode & MODE_NODAEMON)) {
+-		int tempfd;
+-
+-		if (pipe(pipefds)<0) {
+-			perror("statd: unable to create pipe");
+-			exit(1);
+-		}
+-		if ((pid = fork ()) < 0) {
+-			perror ("statd: Could not fork");
+-			exit (1);
+-		} else if (pid != 0) {
+-			/* Parent.
+-			 * Wait for status from child.
+-			 */
+-			close(pipefds[1]);
+-			if (read(pipefds[0], &status, 1) != 1)
+-				exit(1);
+-			exit (0);
+-		}
+-		/* Child.	*/
+-		close(pipefds[0]);
+-		setsid ();
+-
+-		while (pipefds[1] <= 2) {
+-			pipefds[1] = dup(pipefds[1]);
+-			if (pipefds[1]<0) {
+-				perror("statd: dup");
+-				exit(1);
+-			}
+-		}
+-		tempfd = open("/dev/null", O_RDWR);
+-		dup2(tempfd, 0);
+-		dup2(tempfd, 1);
+-		dup2(tempfd, 2);
+-		dup2(pipefds[1], 3);
+-		pipefds[1] = 3;
+-		closeall(4);
+-	}
+-
+-	/* Child. */
++	daemon_init((run_mode & MODE_NODAEMON));
+ 
+ 	if (run_mode & MODE_LOG_STDERR) {
+ 		xlog_syslog(0);
+ 		xlog_stderr(1);
+ 		xlog_config(D_ALL, 1);
++	} else {
++		xlog_syslog(1);
++		xlog_stderr(0);
+ 	}
++
+ 	xlog_open(name_p);
+ 	xlog(L_NOTICE, "Version " VERSION " starting");
+ 
+@@ -512,16 +476,8 @@ int main (int argc, char **argv)
+ 	}
+ 	atexit(statd_unregister);
+ 
+-	/* If we got this far, we have successfully started, so notify parent */
+-	if (pipefds[1] > 0) {
+-		status = 0;
+-		if (write(pipefds[1], &status, 1) != 1) {
+-			xlog_warn("writing to parent pipe failed: errno %d (%s)\n",
+-				errno, strerror(errno));
+-		}
+-		close(pipefds[1]);
+-		pipefds[1] = -1;
+-	}
++	/* If we got this far, we have successfully started */
++	daemon_ready();
+ 
+ 	for (;;) {
+ 		/*

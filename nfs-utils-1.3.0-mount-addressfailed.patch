@@ -1,0 +1,30 @@
+diff -up nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig nfs-utils-1.3.0/utils/nfsd/nfssvc.c
+--- nfs-utils-1.3.0/utils/nfsd/nfssvc.c.orig	2017-10-05 11:34:15.701116069 -0400
++++ nfs-utils-1.3.0/utils/nfsd/nfssvc.c	2017-10-05 11:35:36.493684800 -0400
+@@ -112,7 +112,7 @@ static int
+ nfssvc_setfds(const struct addrinfo *hints, const char *node, const char *port)
+ {
+ 	int fd, on = 1, fac = L_ERROR;
+-	int sockfd = -1, rc = 0;
++	int sockfd = -1, rc = 0, bounded = 0;
+ 	struct addrinfo *addrhead = NULL, *addr;
+ 	char *proto, *family;
+ 
+@@ -234,6 +234,8 @@ nfssvc_setfds(const struct addrinfo *hin
+ 			rc = errno;
+ 			goto error;
+ 		}
++		bounded++;
++
+ 		close(fd);
+ 		close(sockfd);
+ 		sockfd = fd = -1;
+@@ -246,7 +248,7 @@ error:
+ 		close(sockfd);
+ 	if (addrhead)
+ 		freeaddrinfo(addrhead);
+-	return rc;
++	return (bounded ? 0 : rc);
+ }
+ 
+ int

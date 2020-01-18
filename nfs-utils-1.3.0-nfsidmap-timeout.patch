@@ -1,0 +1,22 @@
+diff -up nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c.save nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c
+--- nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c.save	2015-11-24 09:29:53.332040370 -0500
++++ nfs-utils-1.3.0/utils/nfsidmap/nfsidmap.c	2015-11-24 09:30:06.579249849 -0500
+@@ -24,7 +24,7 @@ char *usage="Usage: %s [-v] [-c || [-u|-
+ 
+ #define PROCKEYS "/proc/keys"
+ #ifndef DEFAULT_KEYRING
+-#define DEFAULT_KEYRING "id_resolver"
++#define DEFAULT_KEYRING ".id_resolver"
+ #endif
+ 
+ #ifndef PATH_IDMAPDCONF
+@@ -315,6 +315,9 @@ int main(int argc, char **argv)
+ 			key, type, value, timeout);
+ 	}
+ 
++	/* Become a possesor of the to-be-instantiated key to set the key's timeout */
++	request_key("keyring", DEFAULT_KEYRING, NULL, KEY_SPEC_THREAD_KEYRING);
++
+ 	if (strcmp(type, "uid") == 0)
+ 		rc = id_lookup(value, key, USER);
+ 	else if (strcmp(type, "gid") == 0)

@@ -1,0 +1,21 @@
+commit daf0838e30f896d02ca51becc99578713c1be4cb
+Author: Steve Dickson <steved@redhat.com>
+Date:   Wed Dec 7 13:35:49 2016 -0500
+
+    Fixed typo in usage string
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/nfsdcltrack/nfsdcltrack.c b/utils/nfsdcltrack/nfsdcltrack.c
+index e6e514b..fd64153 100644
+--- a/utils/nfsdcltrack/nfsdcltrack.c
++++ b/utils/nfsdcltrack/nfsdcltrack.c
+@@ -100,7 +100,7 @@ static unsigned char blob[NFS4_OPAQUE_LIMIT];
+ static void
+ usage(char *progname)
+ {
+-	printf("%s [ -hfd ] [ -s dir ] < cmd > < arg >\n", progname);
++	printf("Usage: %s [ -hfd ] [ -s dir ] < cmd > < arg >\n", progname);
+ 	printf("Where < cmd > is one of the following and takes the following < arg >:\n");
+ 	printf("    init\n");
+ 	printf("    create <nfs_client_id4>\n");

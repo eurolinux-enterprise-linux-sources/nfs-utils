@@ -1,0 +1,156 @@
+diff --git a/utils/mount/network.c b/utils/mount/network.c
+index 751f9b8..b2e4374 100644
+--- a/utils/mount/network.c
++++ b/utils/mount/network.c
+@@ -33,11 +33,13 @@
+ #include <errno.h>
+ #include <netdb.h>
+ #include <time.h>
++#include <grp.h>
+ 
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <sys/wait.h>
+ #include <sys/stat.h>
++#include <linux/in6.h>
+ #include <netinet/in.h>
+ #include <rpc/rpc.h>
+ #include <rpc/pmap_prot.h>
+@@ -802,6 +804,7 @@ int start_statd(void)
+ 			pid_t pid = fork();
+ 			switch (pid) {
+ 			case 0: /* child */
++				setgroups(0, NULL);
+ 				setgid(0);
+ 				setuid(0);
+ 				execle(START_STATD, START_STATD, NULL, envp);
+@@ -1112,6 +1115,7 @@ static int nfs_ca_sockname(const struct sockaddr *sap, const socklen_t salen,
+ 		.sin6_addr		= IN6ADDR_ANY_INIT,
+ 	};
+ 	int sock, result = 0;
++	int val;
+ 
+ 	sock = socket(sap->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+ 	if (sock < 0)
+@@ -1123,6 +1127,9 @@ static int nfs_ca_sockname(const struct sockaddr *sap, const socklen_t salen,
+ 			goto out;
+ 		break;
+ 	case AF_INET6:
++		/* Make sure the call-back address is public/permanent */
++		val = IPV6_PREFER_SRC_PUBLIC;
++		setsockopt(sock, SOL_IPV6, IPV6_ADDR_PREFERENCES, &val, sizeof(val));
+ 		if (bind(sock, SAFE_SOCKADDR(&sin6), sizeof(sin6)) < 0)
+ 			goto out;
+ 		break;
+diff --git a/utils/mount/stropts.c b/utils/mount/stropts.c
+index fc68d41..57e932f 100644
+--- a/utils/mount/stropts.c
++++ b/utils/mount/stropts.c
+@@ -91,6 +91,7 @@ struct nfsmount_info {
+ 				*type;		/* "nfs" or "nfs4" */
+ 	char			*hostname;	/* server's hostname */
+ 	struct addrinfo		*address;	/* server's addresses */
++	sa_family_t		family;		/* Address family */
+ 
+ 	struct mount_options	*options;	/* parsed mount options */
+ 	char			**extra_opts;	/* string for /etc/mtab */
+@@ -388,39 +389,19 @@ static int nfs_set_version(struct nfsmount_info *mi)
+  */
+ static int nfs_validate_options(struct nfsmount_info *mi)
+ {
+-	struct addrinfo hint = {
+-		.ai_protocol	= (int)IPPROTO_UDP,
+-	};
+-	sa_family_t family;
+-	int error;
+-
+ 	if (!nfs_parse_devname(mi->spec, &mi->hostname, NULL))
+ 		return 0;
+ 
+-	if (!nfs_nfs_proto_family(mi->options, &family))
++	if (!nfs_nfs_proto_family(mi->options, &mi->family))
+ 		return 0;
+ 
+ 	/*
+ 	 * A remount is not going to be able to change the server's address,
+ 	 * nor should we try to resolve another address for the server as we
+ 	 * may end up with a different address.
++	 * A non-remount will set 'addr' from ->hostname
+ 	 */
+-	if (mi->flags & MS_REMOUNT) {
+-		po_remove_all(mi->options, "addr");
+-	} else {
+-		hint.ai_family = (int)family;
+-		error = getaddrinfo(mi->hostname, NULL, &hint, &mi->address);
+-		if (error != 0) {
+-			nfs_error(_("%s: Failed to resolve server %s: %s"),
+-				progname, mi->hostname, gai_strerror(error));
+-			mi->address = NULL;
+-			return 0;
+-		}
+-
+-		if (!nfs_append_addr_option(mi->address->ai_addr,
+-						mi->address->ai_addrlen, mi->options))
+-			return 0;
+-	}
++	po_remove_all(mi->options, "addr");
+ 
+ 	if (!nfs_set_version(mi))
+ 		return 0;
+@@ -900,7 +881,10 @@ check_result:
+ 			result = nfs_try_mount_v4(mi);
+ 			if (result == 0 && errno != ECONNREFUSED)
+ 				goto check_result;
+-		}
++		} else if (result == 0)
++			/* Restore original errno with v3 failures */
++			errno = ECONNREFUSED;
++
+ 		return result;
+ 	default:
+ 		return result;
+@@ -923,6 +907,32 @@ static int nfs_try_mount(struct nfsmount_info *mi)
+ {
+ 	int result = 0;
+ 
++	if (mi->address == NULL) {
++		struct addrinfo hint = {
++			.ai_protocol	= (int)IPPROTO_UDP,
++		};
++		int error;
++		struct addrinfo *address;
++
++		hint.ai_family = (int)mi->family;
++		error = getaddrinfo(mi->hostname, NULL, &hint, &address);
++		if (error != 0) {
++			if (error == EAI_AGAIN)
++				errno = EAGAIN;
++			else {
++				nfs_error(_("%s: Failed to resolve server %s: %s"),
++					  progname, mi->hostname, gai_strerror(error));
++				errno = EALREADY;
++			}
++			return 0;
++		}
++
++		if (!nfs_append_addr_option(address->ai_addr,
++					    address->ai_addrlen, mi->options))
++			return 0;
++		mi->address = address;
++	}
++
+ 	switch (mi->version.major) {
+ 		case 2:
+ 		case 3:
+@@ -1018,10 +1028,8 @@ static int nfsmount_fg(struct nfsmount_info *mi)
+ 		if (nfs_is_permanent_error(errno))
+ 			break;
+ 
+-		if (time(NULL) > timeout) {
+-			errno = ETIMEDOUT;
++		if (time(NULL) > timeout)
+ 			break;
+-		}
+ 
+ 		if (errno != ETIMEDOUT) {
+ 			if (sleep(secs))

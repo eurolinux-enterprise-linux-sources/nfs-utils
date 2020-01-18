@@ -1,0 +1,100 @@
+commit 0712b5507866d6b3c900623eb1f81fffaec80ae2
+Author: Jianhong Yin <yin-jianhong@163.com>
+Date:   Thu Feb 2 06:21:15 2017 -0500
+
+    mount: fix mount fail that caused by uninitialized struct
+    
+    From: "Jianhong.Yin" <yin-jianhong@163.com>
+    
+    recent changes of utils/mount cause a regression mount fail:
+      https://bugzilla.redhat.com/show_bug.cgi?id=1415024
+    can not reproduce it on x86_64(gcc on x86_64 might do struct
+    initialize by default, I'm not sure). but it can be reproduced
+    always on platform ppc64le aarch64.
+    
+    Signed-off-by: Jianhong Yin <yin-jianhong@163.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/utils/gssd/gssd.c b/utils/gssd/gssd.c
+index 4d18d35..77125f1 100644
+--- a/utils/gssd/gssd.c
++++ b/utils/gssd/gssd.c
+@@ -87,6 +87,7 @@ int  root_uses_machine_creds = 1;
+ unsigned int  context_timeout = 0;
+ unsigned int  rpc_timeout = 5;
+ char *preferred_realm = NULL;
++char *ccachedir = NULL;
+ /* Avoid DNS reverse lookups on server names */
+ static bool avoid_dns = true;
+ int thread_started = false;
+@@ -837,18 +838,9 @@ usage(char *progname)
+ 	exit(1);
+ }
+ 
+-int
+-main(int argc, char *argv[])
++inline static void 
++read_gss_conf(void)
+ {
+-	int fg = 0;
+-	int verbosity = 0;
+-	int rpc_verbosity = 0;
+-	int opt;
+-	int i;
+-	extern char *optarg;
+-	char *progname;
+-	char *ccachedir = NULL;
+-	struct event sighup_ev;
+ 	char *s;
+ 
+ 	conf_init();
+@@ -877,6 +869,22 @@ main(int argc, char *argv[])
+ 	if (s)
+ 		preferred_realm = s;
+ 
++}
++
++int
++main(int argc, char *argv[])
++{
++	int fg = 0;
++	int verbosity = 0;
++	int rpc_verbosity = 0;
++	int opt;
++	int i;
++	extern char *optarg;
++	char *progname;
++	struct event sighup_ev;
++
++	read_gss_conf();
++
+ 	while ((opt = getopt(argc, argv, "DfvrlmnMp:k:d:t:T:R:")) != -1) {
+ 		switch (opt) {
+ 			case 'f':
+diff --git a/utils/mount/network.c b/utils/mount/network.c
+index 7dceb2d..d1c8fec 100644
+--- a/utils/mount/network.c
++++ b/utils/mount/network.c
+@@ -1638,6 +1638,7 @@ int nfs_options2pmap(struct mount_options *options,
+ 		     struct pmap *nfs_pmap, struct pmap *mnt_pmap)
+ {
+ 	struct nfs_version version;
++	memset(&version, 0, sizeof(version));
+ 
+ 	if (!nfs_nfs_program(options, &nfs_pmap->pm_prog))
+ 		return 0;
+diff --git a/utils/mount/stropts.c b/utils/mount/stropts.c
+index 387d734..a9ff95d 100644
+--- a/utils/mount/stropts.c
++++ b/utils/mount/stropts.c
+@@ -517,6 +517,10 @@ nfs_rewrite_pmap_mount_options(struct mount_options *options, int checkv4)
+ 	unsigned long protocol;
+ 	struct pmap mnt_pmap;
+ 
++	/* initialize structs */
++	memset(&nfs_pmap, 0, sizeof(struct pmap));
++	memset(&mnt_pmap, 0, sizeof(struct pmap));
++
+ 	/*
+ 	 * Version and transport negotiation is not required
+ 	 * and does not work for RDMA mounts.

@@ -1,0 +1,38 @@
+commit 8b3abe3a0ae941f3f52f99bc44388b7beb3d9bb8
+Author: Colin Walters <walters@verbum.org>
+Date:   Fri Jun 26 09:31:16 2015 -0400
+
+    systemd: Set var-lib-nfs-rpc_pipefs.mount After= tmpfiles
+    
+    OSTree is a mechanism for atomic updates of operating systems, with
+    designs for how system state is managed; in particular, `/var` should
+    start out empty, and components are responsible for creating content
+    there at runtime.
+    
+    rpm-ostree consumes RPMs and commits them to an OSTree repository.
+    It has some support for automatically synthesizing systemd `tmpfiles.d`
+    snippets from RPM content in `/var` using systemd-tmpfiles.
+    
+    However, in this case nfs-utils wants a mount point directory, and
+    it's running before systemd-tmpfiles. It should be perfectly fine to
+    do this mount after tmpfiles has run.
+    
+    A better fix for this would be to move transient directories to
+    `/run`; However, that would be an invasive change, which can happen
+    after this fix.
+    
+    Signed-off-by: Colin Walters <walters@verbum.org>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+
+diff --git a/systemd/var-lib-nfs-rpc_pipefs.mount b/systemd/var-lib-nfs-rpc_pipefs.mount
+index 33c5db6..26d1c76 100644
+--- a/systemd/var-lib-nfs-rpc_pipefs.mount
++++ b/systemd/var-lib-nfs-rpc_pipefs.mount
+@@ -1,6 +1,7 @@
+ [Unit]
+ Description=RPC Pipe File System
+ DefaultDependencies=no
++After=systemd-tmpfiles-setup.service
+ Conflicts=umount.target
+ 
+ [Mount]

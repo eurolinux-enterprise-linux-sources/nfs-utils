@@ -1,0 +1,77 @@
+diff -up nfs-utils-1.3.0/systemd/auth-rpcgss-module.service.orig nfs-utils-1.3.0/systemd/auth-rpcgss-module.service
+--- nfs-utils-1.3.0/systemd/auth-rpcgss-module.service.orig	2017-05-22 11:22:16.064030000 -0400
++++ nfs-utils-1.3.0/systemd/auth-rpcgss-module.service	2017-06-06 16:19:05.229155456 -0400
+@@ -7,8 +7,8 @@
+ [Unit]
+ Description=Kernel Module supporting RPCSEC_GSS
+ DefaultDependencies=no
+-Before=gssproxy.service rpc-svcgssd.service rpc-gssd.service
+-Wants=gssproxy.service rpc-svcgssd.service rpc-gssd.service
++Before=gssproxy.service rpc-gssd.service
++Wants=gssproxy.service rpc-gssd.service
+ ConditionPathExists=/etc/krb5.keytab
+ 
+ [Service]
+diff -up nfs-utils-1.3.0/systemd/nfs-client.target.orig nfs-utils-1.3.0/systemd/nfs-client.target
+--- nfs-utils-1.3.0/systemd/nfs-client.target.orig	2017-05-22 11:22:16.054029846 -0400
++++ nfs-utils-1.3.0/systemd/nfs-client.target	2017-06-06 16:19:26.653588268 -0400
+@@ -9,7 +9,7 @@ Wants=rpc-statd-notify.service
+ 
+ # GSS services dependencies and ordering
+ Wants=auth-rpcgss-module.service
+-After=rpc-gssd.service rpc-svcgssd.service gssproxy.service
++After=rpc-gssd.service gssproxy.service
+ 
+ [Install]
+ WantedBy=multi-user.target
+diff -up nfs-utils-1.3.0/systemd/nfs.conf.man.orig nfs-utils-1.3.0/systemd/nfs.conf.man
+--- nfs-utils-1.3.0/systemd/nfs.conf.man.orig	2017-05-22 11:22:16.118030830 -0400
++++ nfs-utils-1.3.0/systemd/nfs.conf.man	2017-06-06 16:20:11.502494296 -0400
+@@ -208,15 +208,6 @@ See
+ for details.
+ 
+ .TP
+-.B svcgssd
+-Recognized values:
+-.BR principal .
+-
+-See
+-.BR rpc.svcgssd (8)
+-for details.
+-
+-.TP
+ .B exportfs
+ Only
+ .B debug=
+diff -up nfs-utils-1.3.0/systemd/nfs-server.service.orig nfs-utils-1.3.0/systemd/nfs-server.service
+--- nfs-utils-1.3.0/systemd/nfs-server.service.orig	2017-05-22 11:22:16.138031137 -0400
++++ nfs-utils-1.3.0/systemd/nfs-server.service	2017-06-06 16:16:55.197527187 -0400
+@@ -14,7 +14,7 @@ Before= rpc-statd-notify.service
+ 
+ # GSS services dependencies and ordering
+ Wants=auth-rpcgss-module.service
+-After=rpc-gssd.service gssproxy.service rpc-svcgssd.service
++After=rpc-gssd.service gssproxy.service
+ 
+ Wants=nfs-config.service
+ After=nfs-config.service
+@@ -25,6 +25,7 @@ EnvironmentFile=-/run/sysconfig/nfs-util
+ Type=oneshot
+ RemainAfterExit=yes
+ ExecStartPre=-/usr/sbin/exportfs -r
++ExecStartPre=-/bin/sh -c '/bin/kill -HUP `cat /run/gssproxy.pid`'
+ ExecStart=/usr/sbin/rpc.nfsd $RPCNFSDARGS
+ ExecStop=/usr/sbin/rpc.nfsd 0
+ ExecStopPost=/usr/sbin/exportfs -au
+diff -up nfs-utils-1.3.0/systemd/rpc-gssd.service.orig nfs-utils-1.3.0/systemd/rpc-gssd.service
+--- nfs-utils-1.3.0/systemd/rpc-gssd.service.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/systemd/rpc-gssd.service	2017-06-06 16:24:08.932290804 -0400
+@@ -3,7 +3,7 @@ Description=RPC security service for NFS
+ DefaultDependencies=no
+ Conflicts=umount.target
+ Requires=var-lib-nfs-rpc_pipefs.mount
+-After=var-lib-nfs-rpc_pipefs.mount
++After=var-lib-nfs-rpc_pipefs.mount gssproxy.service
+ 
+ ConditionPathExists=/etc/krb5.keytab
+ 
