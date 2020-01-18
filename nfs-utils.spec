@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.3.0
-Release: 0.61%{?dist}
+Release: 0.65%{?dist}
 Epoch: 1
 
 # group all 32bit related archs
@@ -153,6 +153,14 @@ Patch116: nfs-utils-1.3.0-systemd-nfs-man.patch
 Patch117: nfs-utils-1.3.0-mount-clientaddr.patch
 Patch118: nfs-utils-1.3.0-mount-turnoffv4.patch
 Patch119: nfs-utils-1.3.0-nfsconf-disable-v4.patch
+#
+# RHEL7.7
+#
+Patch120: nfs-utils-1.3.0-statd-useaafter.patch
+Patch121: nfs-utils-1.3.0-nfsconf-manage-gids.patch
+Patch122: nfs-utils-1.3.0-smnotify-f-flag.patch
+Patch123: nfs-utils-1.3.0-statd-no-notify.patch
+Patch124: nfs-utils-1.3.0-mountd-memleak.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1001: nfs-utils-1.2.1-exp-subtree-warn-off.patch
@@ -448,6 +456,16 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch118 -p1
 # 1625032 - [nfsd] fail to disable major NFS version 4 using "vers4=n"...
 %patch119 -p1
+# 1624542 - Fix use-after-free in rpc.statd monitor list when insertion...
+%patch120 -p1
+# 1677403 - nfs.conf: manage-gids option typo
+%patch121 -p1
+# 1688932 - sm-notify: add flag "-f" to nfs.conf parsing (RHEL7)
+%patch122 -p1
+# 1688918 - nfsserver: fix option --no-notify not recognized
+%patch123 -p1
+# 1711210 - rpc.mountd leaks memory
+%patch124 -p1
 
 %patch1000 -p1
 %patch1001 -p1
@@ -700,6 +718,21 @@ fi
 /sbin/umount.nfs4
 
 %changelog
+* Thu May 23 2019 Steve Dickson <steved@redhat.com> 1.3.0-0.65
+- Fixed typo of mountd-memleak.patch not being applied (bz 1711210)
+
+* Thu May 23 2019 Steve Dickson <steved@redhat.com> 1.3.0-0.64
+- rpc.mountd: Fix e_hostname and e_uuid leaks (bz 1711210)
+
+* Fri Mar 15 2019 Steve Dickson <steved@redhat.com> 1.3.0-0.63
+- nfs.conf: Fixed manage-gids option typo (bz 1677403)
+- sm-notify: Added -f flag to nfs.conf parsing (bz 1688932)
+- Add nfs.conf equivalent for the statd --no-notify cmdline option (bz 1688918)
+- nfs-server: Use reload not restart to start gssproxy (bz 1644169)
+
+* Mon Feb 11 2019 Steve Dickson <steved@redhat.com> 1.3.0-0.62
+- statd: fix use-after-free in monitor list if insertion fails (bz 1624542)
+
 * Wed Sep 26 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.61
 - nfs.conf: fail to disable major NFS version 4 using "vers4=n" (bz 1625032)
 

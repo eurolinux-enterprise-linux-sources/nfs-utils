@@ -1,0 +1,62 @@
+diff -up nfs-utils-1.3.0/support/export/xtab.c.orig nfs-utils-1.3.0/support/export/xtab.c
+--- nfs-utils-1.3.0/support/export/xtab.c.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/support/export/xtab.c	2019-05-23 10:38:39.361594392 -0400
+@@ -43,6 +43,14 @@ xtab_read(char *xtab, char *lockfn, int
+ 	while ((xp = getexportent(is_export==0, 0)) != NULL) {
+ 		if (!(exp = export_lookup(xp->e_hostname, xp->e_path, is_export != 1)) &&
+ 		    !(exp = export_create(xp, is_export!=1))) {
++                        if(xp->e_hostname) {
++                            free(xp->e_hostname);
++                            xp->e_hostname=NULL;
++                        }
++                        if(xp->e_uuid) {
++                            free(xp->e_uuid);
++                            xp->e_uuid=NULL;
++                        }
+ 			continue;
+ 		}
+ 		switch (is_export) {
+@@ -58,7 +66,16 @@ xtab_read(char *xtab, char *lockfn, int
+ 		case 2:
+ 			exp->m_exported = -1;/* may be exported */
+ 			break;
+-		}
++		}  
++                if(xp->e_hostname) {
++                    free(xp->e_hostname);
++                    xp->e_hostname=NULL;
++                }
++                if(xp->e_uuid) {
++                    free(xp->e_uuid);
++                    xp->e_uuid=NULL;
++                }
++
+ 	}
+ 	endexportent();
+ 	xfunlock(lockid);
+diff -up nfs-utils-1.3.0/support/nfs/exports.c.orig nfs-utils-1.3.0/support/nfs/exports.c
+--- nfs-utils-1.3.0/support/nfs/exports.c.orig	2019-05-23 10:38:07.558133270 -0400
++++ nfs-utils-1.3.0/support/nfs/exports.c	2019-05-23 10:38:39.362594376 -0400
+@@ -179,9 +179,20 @@ getexportent(int fromkernel, int fromexp
+ 	xfree(ee.e_hostname);
+ 	ee.e_hostname = xstrdup(hostname);
+ 
+-	if (parseopts(opt, &ee, fromexports && !has_default_subtree_opts, NULL) < 0)
+-		return NULL;
++	if (parseopts(opt, &ee, fromexports && !has_default_subtree_opts, NULL) < 0) {
++                if(ee.e_hostname)
++                {
++                    xfree(ee.e_hostname);
++                    ee.e_hostname=NULL;
++                }
++                if(ee.e_uuid)
++                {
++                    xfree(ee.e_uuid);
++                    ee.e_uuid=NULL;
++                }
+ 
++		return NULL;
++        }
+ 	/* resolve symlinks */
+ 	if (realpath(ee.e_path, rpath) != NULL) {
+ 		rpath[sizeof (rpath) - 1] = '\0';
