@@ -1,0 +1,935 @@
+diff --git a/.gitignore b/.gitignore
+index 3d9640d..d26f4be 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -70,6 +70,8 @@ tests/nsm_client/nlm_sm_inter_svc.c
+ tests/nsm_client/nlm_sm_inter_xdr.c
+ utils/nfsidmap/nfsidmap
+ systemd/nfs-server-generator
++systemd/rpc-pipefs-generator
++systemd/rpc-gssd.service
+ # cscope database files
+ cscope.*
+ # generic editor backup et al
+diff --git a/configure.ac b/configure.ac
+index 3bce774..fce0e15 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -498,8 +498,14 @@ AC_SUBST([AM_CFLAGS], ["$my_am_cflags"])
+ # Make sure that $ACLOCAL_FLAGS are used during a rebuild
+ AC_SUBST([ACLOCAL_AMFLAGS], ["-I $ac_macro_dir \$(ACLOCAL_FLAGS)"])
+ 
++# make _sysconfdir available for substituion in config files
++# 2 "evals" needed late to expand variable names.
++AC_SUBST([_sysconfdir])
++AC_CONFIG_COMMANDS_PRE([eval eval _sysconfdir=$sysconfdir])
++
+ AC_CONFIG_FILES([
+ 	Makefile
++	systemd/rpc-gssd.service
+ 	linux-nfs/Makefile
+ 	support/Makefile
+ 	support/export/Makefile
+diff --git a/nfs.conf b/nfs.conf
+index c907de6..89cf386 100644
+--- a/nfs.conf
++++ b/nfs.conf
+@@ -1,7 +1,10 @@
+ #
+-# This is a general conifguration for the 
++# This is a general configuration for the
+ # NFS daemons and tools
+ #
++#[general]
++# pipefs-directory=/var/lib/nfs/rpc_pipefs
++#
+ #[exportfs]
+ # debug=0
+ #
+@@ -12,7 +15,6 @@
+ # limit-to-legacy-enctypes=0
+ # context-timeout=0
+ # rpc-timeout=5
+-# pipefs-directory=/var/lib/nfs/rpc_pipefs
+ # keytab-file=/etc/krb5.keytab
+ # cred-cache-directory=
+ # preferred-realm=
+diff --git a/support/include/xcommon.h b/support/include/xcommon.h
+index d1a4b18..23c9a13 100644
+--- a/support/include/xcommon.h
++++ b/support/include/xcommon.h
+@@ -17,6 +17,12 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#ifdef MAJOR_IN_MKDEV
++#include <sys/mkdev.h>
++#elif defined(MAJOR_IN_SYSMACROS)
++#include <sys/sysmacros.h>
++#endif
++
+ #define streq(s, t)	(strcmp ((s), (t)) == 0)
+ 
+ /* Functions in sundries.c that are used in mount.c and umount.c  */ 
+diff --git a/support/nfs/nfsexport.c b/support/nfs/nfsexport.c
+index f129fd2..c1c736e 100644
+--- a/support/nfs/nfsexport.c
++++ b/support/nfs/nfsexport.c
+@@ -18,6 +18,7 @@
+ #include <fcntl.h>
+ 
+ #include "nfslib.h"
++#include "xcommon.h"
+ 
+ 	/* if /proc/net/rpc/... exists, then 
+ 	 * write to it, as that interface is more stable.
+diff --git a/systemd/Makefile.am b/systemd/Makefile.am
+index b789916..54a3b64 100644
+--- a/systemd/Makefile.am
++++ b/systemd/Makefile.am
+@@ -8,6 +8,7 @@ unit_files =  \
+     nfs-blkmap.service \
+     nfs-config.service \
+     nfs-idmapd.service \
++    rpc_pipefs.target \
+     nfs-mountd.service \
+     nfs-server.service \
+     nfs-utils.service \
+@@ -24,14 +25,23 @@ EXTRA_DIST = $(unit_files) $(man5_MANS) $(man7_MANS)
+ unit_dir = /usr/lib/systemd/system
+ generator_dir = /usr/lib/systemd/system-generators
+ 
+-EXTRA_PROGRAMS	= nfs-server-generator
++EXTRA_PROGRAMS	= nfs-server-generator rpc-pipefs-generator
+ genexecdir = $(generator_dir)
++
++COMMON_SRCS = systemd.c systemd.h
++
++nfs_server_generator_SOURCES = $(COMMON_SRCS) nfs-server-generator.c
++
++rpc_pipefs_generator_SOURCES = $(COMMON_SRCS) rpc-pipefs-generator.c
++
+ nfs_server_generator_LDADD = ../support/export/libexport.a \
+ 			     ../support/nfs/libnfs.a \
+ 			     ../support/misc/libmisc.a
+ 
++rpc_pipefs_generator_LDADD = ../support/nfs/libnfs.a
++
+ if INSTALL_SYSTEMD
+-genexec_PROGRAMS = nfs-server-generator
++genexec_PROGRAMS = nfs-server-generator rpc-pipefs-generator
+ install-data-hook: $(unit_files)
+ 	mkdir -p $(DESTDIR)/$(unitdir)
+ 	cp $(unit_files) $(DESTDIR)/$(unitdir)
+diff --git a/systemd/nfs-blkmap.service b/systemd/nfs-blkmap.service
+index ddbf4e9..c844e2d 100644
+--- a/systemd/nfs-blkmap.service
++++ b/systemd/nfs-blkmap.service
+@@ -2,8 +2,8 @@
+ Description=pNFS block layout mapping daemon
+ DefaultDependencies=no
+ Conflicts=umount.target
+-After=var-lib-nfs-rpc_pipefs.mount
+-Requires=var-lib-nfs-rpc_pipefs.mount
++After=rpc_pipefs.target
++Requires=rpc_pipefs.target
+ 
+ PartOf=nfs-utils.service
+ 
+diff --git a/systemd/nfs-idmapd.service b/systemd/nfs-idmapd.service
+index df3dd9d..38685b6 100644
+--- a/systemd/nfs-idmapd.service
++++ b/systemd/nfs-idmapd.service
+@@ -1,8 +1,8 @@
+ [Unit]
+ Description=NFSv4 ID-name mapping service
+ DefaultDependencies=no
+-Requires=var-lib-nfs-rpc_pipefs.mount
+-After=var-lib-nfs-rpc_pipefs.mount local-fs.target
++Requires=rpc_pipefs.target
++After=rpc_pipefs.target local-fs.target
+ 
+ BindsTo=nfs-server.service
+ 
+diff --git a/systemd/nfs-server-generator.c b/systemd/nfs-server-generator.c
+index 4aa6509..737f109 100644
+--- a/systemd/nfs-server-generator.c
++++ b/systemd/nfs-server-generator.c
+@@ -29,6 +29,7 @@
+ #include "misc.h"
+ #include "nfslib.h"
+ #include "exportfs.h"
++#include "systemd.h"
+ 
+ /* A simple "set of strings" to remove duplicates
+  * found in /etc/exports
+@@ -55,35 +56,6 @@ static int is_unique(struct list **lp, char *path)
+ 	return 1;
+ }
+ 
+-/* We need to convert a path name to a systemd unit
+- * name.  This requires some translation ('/' -> '-')
+- * and some escaping.
+- */
+-static void systemd_escape(FILE *f, char *path)
+-{
+-	while (*path == '/')
+-		path++;
+-	if (!*path) {
+-		/* "/" becomes "-", otherwise leading "/" is ignored */
+-		fputs("-", f);
+-		return;
+-	}
+-	while (*path) {
+-		char c = *path++;
+-
+-		if (c == '/') {
+-			/* multiple non-trailing slashes become '-' */
+-			while (*path == '/')
+-				path++;
+-			if (*path)
+-				fputs("-", f);
+-		} else if (isalnum(c) || c == ':' || c == '.')
+-			fputc(c, f);
+-		else
+-			fprintf(f, "\\x%02x", c & 0xff);
+-	}
+-}
+-
+ static int has_noauto_flag(char *path)
+ {
+ 	FILE		*fstab;
+@@ -108,7 +80,7 @@ static int has_noauto_flag(char *path)
+ 
+ int main(int argc, char *argv[])
+ {
+-	char		*path;
++	char		*path, *spath;
+ 	char		dirbase[] = "/nfs-server.service.d";
+ 	char		filebase[] = "/order-with-mounts.conf";
+ 	nfs_export	*exp;
+@@ -167,9 +139,15 @@ int main(int argc, char *argv[])
+ 		if (strcmp(mnt->mnt_type, "nfs") != 0 &&
+ 		    strcmp(mnt->mnt_type, "nfs4") != 0)
+ 			continue;
+-		fprintf(f, "Before= ");
+-		systemd_escape(f, mnt->mnt_dir);
+-		fprintf(f, ".mount\n");
++
++		spath = systemd_escape(mnt->mnt_dir, ".mount");
++		if (!spath) {
++			fprintf(stderr, 
++				"nfs-server-generator: convert path failed: %s\n",
++				mnt->mnt_dir);
++			continue;
++		}
++		fprintf(f, "Before=%s\n", spath);
+ 	}
+ 
+ 	fclose(fstab);
+diff --git a/systemd/nfs.conf.man b/systemd/nfs.conf.man
+index 938b970..9700586 100644
+--- a/systemd/nfs.conf.man
++++ b/systemd/nfs.conf.man
+@@ -96,6 +96,18 @@ value, which can be one or more from the list
+ .BR all .
+ When a list is given, the members should be comma-separated.
+ .TP
++.B general
++Recognized values:
++.BR pipefs-directory .
++
++See
++.BR blkmapd (8),
++.BR rpc.idmapd (8),
++and
++.BR rpc.gssd (8)
++for details.
++
++.TP
+ .B nfsdcltrack
+ Recognized values:
+ .BR storagedir .
+@@ -198,7 +210,6 @@ Recognized values:
+ .BR limit-to-legacy-enctypes ,
+ .BR context-timeout ,
+ .BR rpc-timeout ,
+-.BR pipefs-directory ,
+ .BR keytab-file ,
+ .BR cred-cache-directory ,
+ .BR preferred-realm .
+diff --git a/systemd/rpc-gssd.service b/systemd/rpc-gssd.service
+deleted file mode 100644
+index 5d6d09f..0000000
+--- a/systemd/rpc-gssd.service
++++ /dev/null
+@@ -1,19 +0,0 @@
+-[Unit]
+-Description=RPC security service for NFS client and server
+-DefaultDependencies=no
+-Conflicts=umount.target
+-Requires=var-lib-nfs-rpc_pipefs.mount
+-After=var-lib-nfs-rpc_pipefs.mount gssproxy.service
+-
+-ConditionPathExists=/etc/krb5.keytab
+-
+-PartOf=nfs-utils.service
+-
+-Wants=nfs-config.service
+-After=nfs-config.service
+-
+-[Service]
+-EnvironmentFile=-/run/sysconfig/nfs-utils
+-
+-Type=forking
+-ExecStart=/usr/sbin/rpc.gssd $GSSDARGS
+diff --git a/systemd/rpc-gssd.service.in b/systemd/rpc-gssd.service.in
+new file mode 100644
+index 0000000..c75ccbd
+--- /dev/null
++++ b/systemd/rpc-gssd.service.in
+@@ -0,0 +1,19 @@
++[Unit]
++Description=RPC security service for NFS client and server
++DefaultDependencies=no
++Conflicts=umount.target
++Requires=rpc_pipefs.target
++After=rpc_pipefs.target gssproxy.service
++
++ConditionPathExists=@_sysconfdir@/krb5.keytab
++
++PartOf=nfs-utils.service
++
++Wants=nfs-config.service
++After=nfs-config.service
++
++[Service]
++EnvironmentFile=-/run/sysconfig/nfs-utils
++
++Type=forking
++ExecStart=/usr/sbin/rpc.gssd $GSSDARGS
+diff --git a/systemd/rpc-pipefs-generator.c b/systemd/rpc-pipefs-generator.c
+new file mode 100644
+index 0000000..66addb9
+--- /dev/null
++++ b/systemd/rpc-pipefs-generator.c
+@@ -0,0 +1,138 @@
++/*
++ * rpc-pipefs-generator:
++ *   systemd generator to create ordering dependencies between
++ *   nfs services and the rpc_pipefs mountpoint
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++#include <stdlib.h>
++#include <string.h>
++#include <ctype.h>
++#include <stdio.h>
++#include <mntent.h>
++
++#include "nfslib.h"
++#include "conffile.h"
++#include "systemd.h"
++
++#define RPC_PIPEFS_DEFAULT "/var/lib/nfs/rpc_pipefs"
++char *conf_path = NFS_CONFFILE;
++
++static int generate_mount_unit(const char *pipefs_path, const char *pipefs_unit,
++			       const char *dirname)
++{
++	char	*path;
++	FILE	*f;
++
++	path = malloc(strlen(dirname) + 1 + strlen(pipefs_unit));
++	if (!path)
++		return 1;
++	sprintf(path, "%s/%s", dirname, pipefs_unit);
++	f = fopen(path, "w");
++	if (!f)
++		return 1;
++
++	fprintf(f, "# Automatically generated by rpc-pipefs-generator\n\n[Unit]\n");
++	fprintf(f, "Description=RPC Pipe File System\n");
++	fprintf(f, "DefaultDependencies=no\n");
++	fprintf(f, "After=systemd-tmpfiles-setup.service\n");
++	fprintf(f, "Conflicts=umount.target\n");
++	fprintf(f, "\n[Mount]\n");
++	fprintf(f, "What=sunrpc\n");
++	fprintf(f, "Where=%s\n", pipefs_path);
++	fprintf(f, "Type=rpc_pipefs\n");
++
++	fclose(f);
++	return 0;
++}
++
++static
++int generate_target(char *pipefs_path, const char *dirname)
++{
++	char	*path;
++	char	filebase[] = "/rpc_pipefs.target";
++	char	*pipefs_unit;
++	FILE	*f;
++	int 	ret = 0;
++
++	pipefs_unit = systemd_escape(pipefs_path, ".mount");
++	if (!pipefs_unit)
++		return 1;
++
++	ret = generate_mount_unit(pipefs_path, pipefs_unit, dirname);
++	if (ret)
++		return ret;
++
++	path = malloc(strlen(dirname) + 1 + sizeof(filebase));
++	if (!path)
++		return 2;
++	sprintf(path, "%s", dirname);
++	mkdir(path, 0755);
++	strcat(path, filebase);
++	f = fopen(path, "w");
++	if (!f)
++		return 1;
++
++	fprintf(f, "# Automatically generated by rpc-pipefs-generator\n\n[Unit]\n");
++	fprintf(f, "Requires=%s\n", pipefs_unit);
++	fprintf(f, "After=%s\n", pipefs_unit);
++	fclose(f);
++
++	return 0;
++}
++
++static int is_non_pipefs_mountpoint(char *path)
++{
++	FILE		*mtab;
++	struct mntent	*mnt;
++
++	mtab = setmntent("/etc/mtab", "r");
++	if (!mtab)
++		return 0;
++
++	while ((mnt = getmntent(mtab)) != NULL) {
++		if (strlen(mnt->mnt_dir) != strlen(path))
++			continue;
++		if (strncmp(mnt->mnt_dir, path, strlen(mnt->mnt_dir)))
++			continue;
++		if (strncmp(mnt->mnt_type, "rpc_pipefs", strlen(mnt->mnt_type)))
++			break;
++	}
++	fclose(mtab);
++	return mnt != NULL;
++}
++
++int main(int argc, char *argv[])
++{
++	int 	ret;
++	char	*s;
++
++	/* Avoid using any external services */
++	xlog_syslog(0);
++
++	if (argc != 4 || argv[1][0] != '/') {
++		fprintf(stderr, "rpc-pipefs-generator: create systemd dependencies for nfs services\n");
++		fprintf(stderr, "Usage: normal-dir early-dir late-dir\n");
++		exit(1);
++	}
++
++	conf_init();
++	s = conf_get_str("general", "pipefs-directory");
++	if (!s)
++		exit(0);
++	if (strlen(s) == strlen(RPC_PIPEFS_DEFAULT) &&
++			strcmp(s, RPC_PIPEFS_DEFAULT) == 0)
++		exit(0);
++
++	if (is_non_pipefs_mountpoint(s))
++		exit(1);
++
++	ret = generate_target(s, argv[1]);
++	exit(ret);
++}
+diff --git a/systemd/rpc-svcgssd.service b/systemd/rpc-svcgssd.service
+index 41177b6..a3a555c 100644
+--- a/systemd/rpc-svcgssd.service
++++ b/systemd/rpc-svcgssd.service
+@@ -1,8 +1,7 @@
+ [Unit]
+ Description=RPC security service for NFS server
+ DefaultDependencies=no
+-Requires=var-lib-nfs-rpc_pipefs.mount
+-After=var-lib-nfs-rpc_pipefs.mount local-fs.target
++After=local-fs.target
+ PartOf=nfs-server.service
+ PartOf=nfs-utils.service
+ 
+diff --git a/systemd/rpc_pipefs.target b/systemd/rpc_pipefs.target
+new file mode 100644
+index 0000000..01d4d27
+--- /dev/null
++++ b/systemd/rpc_pipefs.target
+@@ -0,0 +1,3 @@
++[Unit]
++Requires=var-lib-nfs-rpc_pipefs.mount
++After=var-lib-nfs-rpc_pipefs.mount
+diff --git a/systemd/systemd.c b/systemd/systemd.c
+new file mode 100644
+index 0000000..17820d4
+--- /dev/null
++++ b/systemd/systemd.c
+@@ -0,0 +1,133 @@
++/*
++ * Helper functions for systemd generators in nfs-utils.
++ *
++ * Currently just systemd_escape().
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <ctype.h>
++#include <string.h>
++
++static const char hex[16] =
++{
++  '0', '1', '2', '3', '4', '5', '6', '7',
++  '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
++};
++
++/*
++ * determine length of the string that systemd_escape() needs to allocate
++ */
++static int systemd_len(char *path)
++{
++	char *p;
++	int len = 0;
++
++	p = path;
++	while (*p == '/')
++		/* multiple leading "/" are ignored */
++		p++;
++
++	if (!*p)
++		/* root directory "/" becomes is encoded as a single "-" */
++		return 1;
++
++	if (*p == '.')
++		/*
++		 * replace "." with "\x2d" escape sequence if
++		 * it's the first character in escaped path
++		 * */
++		len += 4;
++
++	while (*p) {
++		unsigned char c = *p++;
++
++		if (c == '/') {
++			/* multiple non-trailing slashes become '-' */
++			while (*p == '/')
++				p++;
++			if (*p)
++				len++;
++		} else if (isalnum(c) || c == ':' || c == '.' || c == '_')
++			/* these characters are not replaced */
++			len++;
++		else
++			/* replace with "\x2d" escape sequence */
++			len += 4;
++	}
++
++	return len;
++}
++
++/*
++ * convert c to "\x2d" escape sequence and append to string
++ * at position p, advancing p
++ */
++static char *hexify(unsigned char c, char *p)
++{
++	*p++ = '\\';
++	*p++ = 'x';
++	*p++ = hex[c >> 4];
++	*p++ = hex[c & 0xf];
++	return p;
++}
++
++/*
++ * convert a path to a unit name according to the logic in systemd.unit(5):
++ *
++ *     Basically, given a path, "/" is replaced by "-", and all other
++ *     characters which are not ASCII alphanumerics are replaced by C-style
++ *     "\x2d" escapes (except that "_" is never replaced and "." is only
++ *     replaced when it would be the first character in the escaped path).
++ *     The root directory "/" is encoded as single dash, while otherwise the
++ *     initial and ending "/" are removed from all paths during
++ *     transformation.
++ *
++ * NB: Although the systemd.unit(5) doesn't mention it, the ':' character
++ * is not escaped.
++ */
++char *systemd_escape(char *path, char *suffix)
++{
++	char *result;
++	char *p;
++	int len;
++
++	len = systemd_len(path);
++	result = malloc(len + strlen(suffix) + 1);
++	p = result;
++	while (*path == '/')
++		/* multiple leading "/" are ignored */
++		path++;
++	if (!*path) {
++		/* root directory "/" becomes is encoded as a single "-" */
++		*p++ = '-';
++		goto out;
++	}
++	if (*path == '.')
++		/*
++		 * replace "." with "\x2d" escape sequence if
++		 * it's the first character in escaped path
++		 * */
++		p = hexify(*path++, p);
++
++	while (*path) {
++		unsigned char c = *path++;
++
++		if (c == '/') {
++			/* multiple non-trailing slashes become '-' */
++			while (*path == '/')
++				path++;
++			if (*path)
++				*p++ = '-';
++		} else if (isalnum(c) || c == ':' || c == '.' || c == '_')
++			/* these characters are not replaced */
++			*p++ = c;
++		else
++			/* replace with "\x2d" escape sequence */
++			p = hexify(c, p);
++	}
++
++out:
++	sprintf(p, "%s", suffix);
++	return result;
++}
+diff --git a/systemd/systemd.h b/systemd/systemd.h
+new file mode 100644
+index 0000000..25235ec
+--- /dev/null
++++ b/systemd/systemd.h
+@@ -0,0 +1,6 @@
++#ifndef SYSTEMD_H
++#define SYSTEMD_H
++
++char *systemd_escape(char *path, char *suffix);
++
++#endif /* SYSTEMD_H */
+diff --git a/utils/blkmapd/blkmapd.man b/utils/blkmapd/blkmapd.man
+index 914b80f..4b3d3f0 100644
+--- a/utils/blkmapd/blkmapd.man
++++ b/utils/blkmapd/blkmapd.man
+@@ -43,9 +43,24 @@ Performs device discovery only then exits.
+ Runs
+ .B blkmapd
+ in the foreground and sends output to stderr (as opposed to syslogd)
++.SH CONFIGURATION FILE
++The
++.B blkmapd
++daemon recognizes the following value from the
++.B [general]
++section of the
++.I /etc/nfs.conf
++configuration file:
++.TP
++.B pipefs-directory
++Tells
++.B blkmapd
++where to look for the rpc_pipefs filesystem.  The default value is
++.IR /var/lib/nfs/rpc_pipefs .
+ .SH SEE ALSO
+ .BR nfs (5),
+-.BR dmsetup (8)
++.BR dmsetup (8),
++.BR nfs.conf (5)
+ .sp
+ RFC 5661 for the NFS version 4.1 specification.
+ .br
+diff --git a/utils/blkmapd/device-discovery.c b/utils/blkmapd/device-discovery.c
+index b010628..a419947 100644
+--- a/utils/blkmapd/device-discovery.c
++++ b/utils/blkmapd/device-discovery.c
+@@ -50,19 +50,36 @@
+ #include <errno.h>
+ #include <libdevmapper.h>
+ 
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif /* HAVE_CONFIG_H */
++
+ #include "device-discovery.h"
++#include "xcommon.h"
++#include "nfslib.h"
++#include "conffile.h"
+ 
+ #define EVENT_SIZE (sizeof(struct inotify_event))
+ #define EVENT_BUFSIZE (1024 * EVENT_SIZE)
+ 
+-#define BL_PIPE_FILE	"/var/lib/nfs/rpc_pipefs/nfs/blocklayout"
+-#define NFSPIPE_DIR	"/var/lib/nfs/rpc_pipefs/nfs"
+ #define RPCPIPE_DIR	"/var/lib/nfs/rpc_pipefs"
+ #define PID_FILE	"/var/run/blkmapd.pid"
+ 
++#define CONF_SAVE(w, f) do {			\
++	char *p = f;				\
++	if (p != NULL)				\
++		(w) = p;			\
++} while (0)
++
++static char bl_pipe_file[PATH_MAX];
++static char nfspipe_dir[PATH_MAX];
++static char rpcpipe_dir[PATH_MAX];
++
+ struct bl_disk *visible_disk_list;
+ int    bl_watch_fd, bl_pipe_fd, nfs_pipedir_wfd, rpc_pipedir_wfd;
+ int    pidfd = -1;
++char   *conf_path = NULL;
++
+ 
+ struct bl_disk_path *bl_get_path(const char *filepath,
+ 				 struct bl_disk_path *paths)
+@@ -357,8 +374,8 @@ static void bl_rpcpipe_cb(void)
+ 				continue;
+ 			if (event->mask & IN_CREATE) {
+ 				BL_LOG_WARNING("nfs pipe dir created\n");
+-				bl_watch_dir(NFSPIPE_DIR, &nfs_pipedir_wfd);
+-				bl_pipe_fd = open(BL_PIPE_FILE, O_RDWR);
++				bl_watch_dir(nfspipe_dir, &nfs_pipedir_wfd);
++				bl_pipe_fd = open(bl_pipe_file, O_RDWR);
+ 			} else if (event->mask & IN_DELETE) {
+ 				BL_LOG_WARNING("nfs pipe dir deleted\n");
+ 				inotify_rm_watch(bl_watch_fd, nfs_pipedir_wfd);
+@@ -371,7 +388,7 @@ static void bl_rpcpipe_cb(void)
+ 				continue;
+ 			if (event->mask & IN_CREATE) {
+ 				BL_LOG_WARNING("blocklayout pipe file created\n");
+-				bl_pipe_fd = open(BL_PIPE_FILE, O_RDWR);
++				bl_pipe_fd = open(bl_pipe_file, O_RDWR);
+ 				if (bl_pipe_fd < 0)
+ 					BL_LOG_ERR("open %s failed: %s\n",
+ 						event->name, strerror(errno));
+@@ -437,6 +454,19 @@ int main(int argc, char **argv)
+ 	int opt, dflag = 0, fg = 0, ret = 1;
+ 	struct stat statbuf;
+ 	char pidbuf[64];
++	char *xrpcpipe_dir = NULL;
++
++	strncpy(rpcpipe_dir, RPCPIPE_DIR, sizeof(rpcpipe_dir));
++	conf_path = NFS_CONFFILE;
++	conf_init();
++	CONF_SAVE(xrpcpipe_dir, conf_get_str("general", "pipefs-directory"));
++	if (xrpcpipe_dir != NULL)
++		strlcpy(rpcpipe_dir, xrpcpipe_dir, sizeof(rpcpipe_dir));
++
++	strncpy(nfspipe_dir, rpcpipe_dir, sizeof(nfspipe_dir));
++	strlcat(nfspipe_dir, "/nfs", sizeof(nfspipe_dir));
++	strncpy(bl_pipe_file, rpcpipe_dir, sizeof(bl_pipe_file));
++	strlcat(bl_pipe_file, "/nfs/blocklayout", sizeof(bl_pipe_file));
+ 
+ 	while ((opt = getopt(argc, argv, "hdf")) != -1) {
+ 		switch (opt) {
+@@ -501,12 +531,12 @@ int main(int argc, char **argv)
+ 	}
+ 
+ 	/* open pipe file */
+-	bl_watch_dir(RPCPIPE_DIR, &rpc_pipedir_wfd);
+-	bl_watch_dir(NFSPIPE_DIR, &nfs_pipedir_wfd);
++	bl_watch_dir(rpcpipe_dir, &rpc_pipedir_wfd);
++	bl_watch_dir(nfspipe_dir, &nfs_pipedir_wfd);
+ 
+-	bl_pipe_fd = open(BL_PIPE_FILE, O_RDWR);
++	bl_pipe_fd = open(bl_pipe_file, O_RDWR);
+ 	if (bl_pipe_fd < 0)
+-		BL_LOG_ERR("open pipe file %s failed: %s\n", BL_PIPE_FILE, strerror(errno));
++		BL_LOG_ERR("open pipe file %s failed: %s\n", bl_pipe_file, strerror(errno));
+ 
+ 	while (1) {
+ 		/* discover device when needed */
+diff --git a/utils/gssd/gssd.c b/utils/gssd/gssd.c
+index c5c03fb..10d50d3 100644
+--- a/utils/gssd/gssd.c
++++ b/utils/gssd/gssd.c
+@@ -857,6 +857,10 @@ read_gss_conf(void)
+ 	s = conf_get_str("gssd", "pipefs-directory");
+ 	if (!s)
+ 		s = conf_get_str("general", "pipefs-directory");
++	else
++		printerr(0, "WARNING: Specifying pipefs-directory in the [gssd] "
++			 "section of %s is deprecated.  Use the [general] "
++			 "section instead.", NFS_CONFFILE);
+ 	if (s)
+ 		pipefs_path = s;
+ 	s = conf_get_str("gssd", "keytab-file");
+diff --git a/utils/gssd/gssd.man b/utils/gssd/gssd.man
+index 87eef02..e620f0d 100644
+--- a/utils/gssd/gssd.man
++++ b/utils/gssd/gssd.man
+@@ -335,10 +335,6 @@ Equivalent to
+ Equivalent to
+ .BR -t .
+ .TP
+-.B pipefs-directory
+-Equivalent to
+-.BR -p .
+-.TP
+ .B keytab-file
+ Equivalent to
+ .BR -k .
+@@ -350,6 +346,14 @@ Equivalent to
+ .B preferred-realm
+ Equivalent to
+ .BR -R .
++.P
++In addtion, the following value is recognized from the
++.B [general]
++section:
++.TP
++.B pipefs-directory
++Equivalent to
++.BR -p .
+ 
+ .SH SEE ALSO
+ .BR rpc.svcgssd (8),
+diff --git a/utils/idmapd/idmapd.c b/utils/idmapd/idmapd.c
+index f55d2e1..03efbea 100644
+--- a/utils/idmapd/idmapd.c
++++ b/utils/idmapd/idmapd.c
+@@ -166,7 +166,7 @@ static uid_t nobodyuid;
+ static gid_t nobodygid;
+ 
+ /* Used by conffile.c in libnfs.a */
+-char *conf_path;
++char *conf_path = NULL;
+ 
+ static int
+ flush_nfsd_cache(char *path, time_t now)
+@@ -220,7 +220,6 @@ main(int argc, char **argv)
+ 	int ret;
+ 	char *progname;
+ 
+-	conf_path = _PATH_IDMAPDCONF;
+ 	nobodyuser = NFS4NOBODY_USER;
+ 	nobodygroup = NFS4NOBODY_GROUP;
+ 	strlcpy(pipefsdir, PIPEFS_DIR, sizeof(pipefsdir));
+@@ -234,8 +233,11 @@ main(int argc, char **argv)
+ #define GETOPTSTR "hvfd:p:U:G:c:CS"
+ 	opterr=0; /* Turn off error messages */
+ 	while ((opt = getopt(argc, argv, GETOPTSTR)) != -1) {
+-		if (opt == 'c')
++		if (opt == 'c') {
++			warnx("-c is deprecated and may be removed in the "
++			      "future.  See idmapd(8).");
+ 			conf_path = optarg;
++		}
+ 		if (opt == '?') {
+ 			if (strchr(GETOPTSTR, optopt))
+ 				warnx("'-%c' option requires an argument.", optopt);
+@@ -247,17 +249,33 @@ main(int argc, char **argv)
+ 	}
+ 	optind = 1;
+ 
+-	if (stat(conf_path, &sb) == -1 && (errno == ENOENT || errno == EACCES)) {
+-		warn("Skipping configuration file \"%s\"", conf_path);
+-		conf_path = NULL;
++	if (conf_path) { /* deprecated -c option was specified */
++		if (stat(conf_path, &sb) == -1 && (errno == ENOENT || errno == EACCES)) {
++			warn("Skipping configuration file \"%s\"", conf_path);
++			conf_path = NULL;
++		} else {
++			conf_init();
++			verbose = conf_get_num("General", "Verbosity", 0);
++			cache_entry_expiration = conf_get_num("General",
++					"Cache-Expiration", DEFAULT_IDMAP_CACHE_EXPIRY);
++			CONF_SAVE(xpipefsdir, conf_get_str("General", "Pipefs-Directory"));
++			if (xpipefsdir != NULL)
++				strlcpy(pipefsdir, xpipefsdir, sizeof(pipefsdir));
++			CONF_SAVE(nobodyuser, conf_get_str("Mapping", "Nobody-User"));
++			CONF_SAVE(nobodygroup, conf_get_str("Mapping", "Nobody-Group"));
++		}
+ 	} else {
++		conf_path = NFS_CONFFILE;
+ 		conf_init();
+-		verbose = conf_get_num("General", "Verbosity", 0);
+-		cache_entry_expiration = conf_get_num("General",
+-				"Cache-Expiration", DEFAULT_IDMAP_CACHE_EXPIRY);
+ 		CONF_SAVE(xpipefsdir, conf_get_str("General", "Pipefs-Directory"));
+ 		if (xpipefsdir != NULL)
+ 			strlcpy(pipefsdir, xpipefsdir, sizeof(pipefsdir));
++
++		conf_path = _PATH_IDMAPDCONF;
++		conf_init();
++		verbose = conf_get_num("General", "Verbosity", 0);
++		cache_entry_expiration = conf_get_num("General",
++				"cache-expiration", DEFAULT_IDMAP_CACHE_EXPIRY);
+ 		CONF_SAVE(nobodyuser, conf_get_str("Mapping", "Nobody-User"));
+ 		CONF_SAVE(nobodygroup, conf_get_str("Mapping", "Nobody-Group"));
+ 	}
+diff --git a/utils/idmapd/idmapd.man b/utils/idmapd/idmapd.man
+index b9200c7..fb5fc1e 100644
+--- a/utils/idmapd/idmapd.man
++++ b/utils/idmapd/idmapd.man
+@@ -50,11 +50,28 @@ The default value is \&"/var/lib/nfs/rpc_pipefs\&".
+ .It Fl c Ar path
+ Use configuration file
+ .Ar path .
++This option is deprecated.
+ .It Fl C
+ Client-only: perform no idmapping for any NFS server, even if one is detected.
+ .It Fl S
+ Server-only: perform no idmapping for any NFS client, even if one is detected.
+ .El
++.Sh CONFIGURATION FILES
++.Nm
++recognizes the following value from the
++.Sy [general]
++section of the
++.Pa /etc/nfs.conf
++configuration file:
++.Bl -tag -width Ds_imagedir
++.It Sy pipefs-directory
++Equivalent to
++.Sy -p .
++.El
++.Pp
++All other settings related to id mapping are found in the
++.Pa /etc/idmapd.conf
++configuration file.
+ .Sh EXAMPLES
+ .Cm rpc.idmapd -f -vvv
+ .Pp
+@@ -71,9 +88,11 @@ messages to console, and with a verbosity level of 3.
+ .\" This next request is for sections 1, 6, 7 & 8 only.
+ .\" .Sh ENVIRONMENT
+ .Sh FILES
+-.Pa /etc/idmapd.conf
++.Pa /etc/idmapd.conf ,
++.Pa /etc/nfs.conf
+ .Sh SEE ALSO
+ .Xr idmapd.conf 5 ,
++.Xr nfs.conf 5 ,
+ .Xr nfsidmap 8
+ .\".Sh SEE ALSO
+ .\".Xr nylon.conf 4
+diff --git a/utils/mountd/cache.c b/utils/mountd/cache.c
+index 3bc13ca..f23fb5a 100644
+--- a/utils/mountd/cache.c
++++ b/utils/mountd/cache.c
+@@ -31,6 +31,7 @@
+ #include "mountd.h"
+ #include "fsloc.h"
+ #include "pseudoflavors.h"
++#include "xcommon.h"
+ 
+ #ifdef USE_BLKID
+ #include "blkid/blkid.h"

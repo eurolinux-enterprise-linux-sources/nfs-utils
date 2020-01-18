@@ -1,0 +1,22 @@
+commit a1f89c17f529b688ce3f686a48a49cb3789807c5
+Author: Steve Dickson <steved@redhat.com>
+Date:   Thu Jul 27 10:35:55 2017 -0400
+
+    mountstats:  Remove a shebang
+    
+    There might be an issue that the script is executed with unwanted
+    version of <lang>.
+    
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+    (cherry picked from commit caa59a30b78dedea99a2317da95bb86810360645)
+
+diff --git a/tools/mountstats/mountstats.py b/tools/mountstats/mountstats.py
+index 90b15a5..1dd1f1b 100644
+--- a/tools/mountstats/mountstats.py
++++ b/tools/mountstats/mountstats.py
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env python
++#!/usr/bin/python
+ # -*- python-mode -*-
+ """Parse /proc/self/mountstats and display it in human readable form
+ """

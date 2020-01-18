@@ -1,0 +1,24 @@
+commit d6ee36b8dcc663dc2b797d51e553f390ea2f7e31
+Author: Steve Dickson <steved@redhat.com>
+Date:   Wed Jul 19 16:42:39 2017 -0400
+
+    nfsdcltrack.c: remove a warning
+    
+    nfsdcltrack.c:581:4: warning: this statement may fall through [-Wimplicit-fallthrough=]
+    
+    Acked-by: Jeff Layton <jlayton@redhat.com>
+    Signed-off-by: Steve Dickson <steved@redhat.com>
+    (cherry picked from commit f80c9984339da6f689f330b8a83d5ee503126827)
+
+diff --git a/utils/nfsdcltrack/nfsdcltrack.c b/utils/nfsdcltrack/nfsdcltrack.c
+index 7af9efb..2f58f96 100644
+--- a/utils/nfsdcltrack/nfsdcltrack.c
++++ b/utils/nfsdcltrack/nfsdcltrack.c
+@@ -581,6 +581,7 @@ main(int argc, char **argv)
+ 		switch (arg) {
+ 		case 'd':
+ 			xlog_config(D_ALL, 1);
++			break;
+ 		case 'f':
+ 			xlog_syslog(0);
+ 			xlog_stderr(1);

@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.3.0
-Release: 0.48%{?dist}.3
+Release: 0.54%{?dist}
 Epoch: 1
 
 # group all 32bit related archs
@@ -126,12 +126,19 @@ Patch095: nfs-utils-1.3.0-mount-use-minor-default.patch
 Patch096: nfs-utils-1.3.0-mount-restore-econn.patch
 Patch097: nfs-utils-1.3.0-exportfs-path-comp.patch
 #
-# RHEL7.4-Z
+# RHEL7.5
 #
-Patch098: nfs-utils-1.3.0-mount-addressfailed.patch
-Patch099: nfs-utils-1.3.0-mount-eacces.patch
-Patch100: nfs-utils-1.3.0-mount-minorversion.patch
-Patch101: nfs-utils-1.3.0-mount-t-nfs4.patch
+Patch098: nfs-utils-1.3.0-mount-eacces.patch
+Patch099: nfs-utils-1.3.0-mount-minorversion.patch
+Patch100: nfs-utils-1.3.0-mountstats-shebang.patch
+Patch101: nfs-utils-1.3.0-nfsdcltrack-warning01.patch
+Patch102: nfs-utils-1.3.0-mount-addressfailed.patch
+Patch103: nfs-utils-1.3.0-mount-nfsvers.patch
+Patch104: nfs-utils-1.3.0-server-chgrpcpipefs.patch
+Patch105: nfs-utils-1.3.0-nfsdcltrack-invalops.patch
+Patch106: nfs-utils-1.3.0-nfs-man-v2.patch
+Patch107: nfs-utils-1.3.0-nfs-iostat-no-dev.patch
+Patch108: nfs-utils-1.3.0-mount-t-nfs4.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1001: nfs-utils-1.2.1-exp-subtree-warn-off.patch
@@ -383,14 +390,28 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch096 -p1
 # 1389046 Pacemaker node fenced out due to redundant export...
 %patch097 -p1
-# 1498959 - RHEL7.4: service nfs-server start fails the first time...
+# 1479573 - RHEL7.4: NFS mount to DELL/EMC Isilon servers fails...
 %patch098 -p1
-# 1518718 - RHEL7.4: NFS mount to DELL/EMC Isilon servers fails...
+# 1489262 - nfs-utils: minorversion can't work
 %patch099 -p1
-# 1547681 - nfs-utils: minorversion can't work
+# 987031 - nfs-utils - shebang with /usr/bin/env 
 %patch100 -p1
-# 1551927 - Incorrect NFS version string reported for NFSv4.2 mounts
+# 1475462 - nfsdcltrack -d should log to syslog without...
 %patch101 -p1
+# 1450528 - RHEL7.4: service nfs-server start fails the first... 
+%patch102 -p1
+# 1496822 - mount.nfs calls mount() with nfsvers setting from...
+%patch103 -p1
+# 1358333 - nfs-server: Possibility to change rpc_pipefs mount point
+%patch104 -p1
+# 1461349 - nfsdcltrack should return error code instead of 0....
+%patch105 -p1
+# 1452461 - NFSv2 is supported at RHEL 7 nfs server end after making...
+%patch106 -p1
+# 1508046 - nfsiostat errors on 'no device mounted on /sys/kernel/debug...
+%patch107 -p1
+# 1547506 - Incorrect NFS version string reported for NFSv4.2 mounts
+%patch108 -p1
 
 %patch1000 -p1
 %patch1001 -p1
@@ -635,6 +656,7 @@ fi
 %{_unitdir}/*
 %attr(755,root,root) /usr/lib/systemd/scripts/nfs-utils_env.sh
 %{_prefix}/lib/systemd/system-generators/nfs-server-generator
+%{_prefix}/lib/systemd/system-generators/rpc-pipefs-generator
 
 %attr(4755,root,root)	/sbin/mount.nfs
 /sbin/mount.nfs4
@@ -642,17 +664,29 @@ fi
 /sbin/umount.nfs4
 
 %changelog
-* Wed Mar 14 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.48_4.3
-- mount: move handling of "-t nfs4" into nfs_nfs_version() (bz 1551927)
+* Thu Feb 22 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.54
+- mount: move handling of "-t nfs4" into nfs_nfs_version() (bz 1547506)
 
-* Thu Feb 22 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.48_4.2
-- mount: Fix problems with parsing minorversion= (bz 1547681)
+* Tue Jan  2 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.53
+- nfs(5): updated mount information to say 4.1 (bz 1452461) 
 
-* Thu Nov 30 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.48_4.1
-- mount: handle EACCES during version negotiation (bz 1518718)
+* Fri Nov  3 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.52
+- nfs(5): update some version information (bz 1452461)
+- nfsiostat: avoid parsing "no device mounted ..." line (bz 1508046)
 
-* Fri Oct  6 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.48_4
+* Thu Oct 12 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.51
+- systemd: add a generator for the rpc_pipefs mountpoint (bz 1358333)
+- nfsdcltrack: return an non-zero value for invalid options (bz 1461349)
+
+* Thu Oct  5 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.50
 - rpc.nfsd: Do not fail when all address families are not support (bz 1450528)
+- mount.nfs: merge in vers= and nfsvers= options (bz 1496822)
+
+* Tue Sep 19 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.49
+- mount: handle EACCES during version negotiation (bz 1479573)
+- mount: Fix problems with parsing minorversion= (bz 1489262)
+- mountstats:  Remove a shebang (bz 987031)
+- nfsdcltrack: remove a warning (bz 1475462)
 
 * Mon Jun 19 2017 Steve Dickson <steved@redhat.com> 1.3.0-0.48
 - exportfs: fix path comparison in unexportfs_parsed() (bz 1389046)
