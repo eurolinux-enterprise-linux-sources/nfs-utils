@@ -1,0 +1,124 @@
+diff -up nfs-utils-1.3.0/utils/mount/configfile.c.orig nfs-utils-1.3.0/utils/mount/configfile.c
+--- nfs-utils-1.3.0/utils/mount/configfile.c.orig	2018-02-22 09:31:57.000000000 -0500
++++ nfs-utils-1.3.0/utils/mount/configfile.c	2018-02-22 09:33:05.000000000 -0500
+@@ -265,7 +265,7 @@ default_value(char *mopt)
+ 		}
+ 	} else if (strncasecmp(field, "vers", strlen("vers")) == 0) {
+ 		if ((options = po_split(field)) != NULL) {
+-			if (!nfs_nfs_version(options, &config_default_vers)) {
++			if (!nfs_nfs_version("nfs", options, &config_default_vers)) {
+ 				xlog_warn("Unable to set default version: %s", 
+ 					strerror(errno));
+ 				
+diff -up nfs-utils-1.3.0/utils/mount/network.c.orig nfs-utils-1.3.0/utils/mount/network.c
+--- nfs-utils-1.3.0/utils/mount/network.c.orig	2018-02-22 09:31:57.000000000 -0500
++++ nfs-utils-1.3.0/utils/mount/network.c	2018-02-22 09:33:05.000000000 -0500
+@@ -1253,7 +1253,7 @@ nfs_nfs_program(struct mount_options *op
+  * or FALSE if the option was specified with an invalid value.
+  */
+ int
+-nfs_nfs_version(struct mount_options *options, struct nfs_version *version)
++nfs_nfs_version(char *type, struct mount_options *options, struct nfs_version *version)
+ {
+ 	char *version_key, *version_val, *cptr;
+ 	int i, found = 0;
+@@ -1268,10 +1268,11 @@ nfs_nfs_version(struct mount_options *op
+ 		}
+ 	}
+ 
+-	if (!found)
++	if (!found && strcmp(type, "nfs4") == 0)
++		version_val = type + 3;
++	else if (!found)
+ 		return 1;
+-
+-	if (i <= 2 ) {
++	else if (i <= 2 ) {
+ 		/* v2, v3, v4 */
+ 		version_val = version_key + 1;
+ 		version->v_mode = V_SPECIFIC;
+@@ -1648,7 +1649,7 @@ int nfs_options2pmap(struct mount_option
+ 
+ 	if (!nfs_nfs_program(options, &nfs_pmap->pm_prog))
+ 		return 0;
+-	if (!nfs_nfs_version(options, &version))
++	if (!nfs_nfs_version("nfs", options, &version))
+ 		return 0;
+ 	nfs_pmap->pm_vers = version.major;
+ 	if (!nfs_nfs_protocol(options, &nfs_pmap->pm_prot))
+diff -up nfs-utils-1.3.0/utils/mount/network.h.orig nfs-utils-1.3.0/utils/mount/network.h
+--- nfs-utils-1.3.0/utils/mount/network.h.orig	2018-02-22 09:31:57.000000000 -0500
++++ nfs-utils-1.3.0/utils/mount/network.h	2018-02-22 09:33:05.000000000 -0500
+@@ -72,7 +72,7 @@ struct nfs_version {
+ 
+ int nfs_nfs_proto_family(struct mount_options *options, sa_family_t *family);
+ int nfs_mount_proto_family(struct mount_options *options, sa_family_t *family);
+-int nfs_nfs_version(struct mount_options *options, struct nfs_version *version);
++int nfs_nfs_version(char *type, struct mount_options *options, struct nfs_version *version);
+ int  nfs_nfs_protocol(struct mount_options *options, unsigned long *protocol);
+ 
+ int nfs_options2pmap(struct mount_options *,
+diff -up nfs-utils-1.3.0/utils/mount/nfsumount.c.orig nfs-utils-1.3.0/utils/mount/nfsumount.c
+--- nfs-utils-1.3.0/utils/mount/nfsumount.c.orig	2018-02-22 09:31:57.000000000 -0500
++++ nfs-utils-1.3.0/utils/mount/nfsumount.c	2018-02-22 09:33:05.000000000 -0500
+@@ -180,7 +180,7 @@ static int nfs_umount_is_vers4(const str
+ 		options = po_split(pmc->m.mnt_opts);
+ 		if (options != NULL) {
+ 			struct nfs_version version;
+-			int rc = nfs_nfs_version(options, &version);
++			int rc = nfs_nfs_version("nfs", options, &version);
+ 			po_destroy(options);
+ 			if (rc && version.major == 4)
+ 				goto out_nfs4;
+diff -up nfs-utils-1.3.0/utils/mount/stropts.c.orig nfs-utils-1.3.0/utils/mount/stropts.c
+--- nfs-utils-1.3.0/utils/mount/stropts.c.orig	2018-02-22 09:31:57.000000000 -0500
++++ nfs-utils-1.3.0/utils/mount/stropts.c	2018-02-22 09:33:05.000000000 -0500
+@@ -87,8 +87,8 @@ extern int sloppy;
+ 
+ struct nfsmount_info {
+ 	const char		*spec,		/* server:/path */
+-				*node,		/* mounted-on dir */
+-				*type;		/* "nfs" or "nfs4" */
++				*node;		/* mounted-on dir */
++	char			*type;		/* "nfs" or "nfs4" */
+ 	char			*hostname;	/* server's hostname */
+ 	struct addrinfo		*address;	/* server's addresses */
+ 	sa_family_t		family;		/* Address family */
+@@ -326,15 +326,9 @@ static int nfs_append_sloppy_option(stru
+ 
+ static int nfs_set_version(struct nfsmount_info *mi)
+ {
+-	if (!nfs_nfs_version(mi->options, &mi->version))
++	if (!nfs_nfs_version(mi->type, mi->options, &mi->version))
+ 		return 0;
+ 
+-	if (strncmp(mi->type, "nfs4", 4) == 0) {
+-		/* Set to default values */
+-		mi->version.major = NFS_DEFAULT_MAJOR;
+-		mi->version.minor = NFS_DEFAULT_MINOR;
+-		mi->version.v_mode = V_GENERAL;
+-	}
+ 	/*
+ 	 * Before 2.6.32, the kernel NFS client didn't
+ 	 * support "-t nfs vers=4" mounts, so NFS version
+@@ -1182,7 +1176,7 @@ static int nfsmount_start(struct nfsmoun
+  *
+  * Returns a valid mount command exit code.
+  */
+-int nfsmount_string(const char *spec, const char *node, const char *type,
++int nfsmount_string(const char *spec, const char *node, char *type,
+ 		    int flags, char **extra_opts, int fake, int child)
+ {
+ 	struct nfsmount_info mi = {
+diff -up nfs-utils-1.3.0/utils/mount/stropts.h.orig nfs-utils-1.3.0/utils/mount/stropts.h
+--- nfs-utils-1.3.0/utils/mount/stropts.h.orig	2014-03-25 11:12:07.000000000 -0400
++++ nfs-utils-1.3.0/utils/mount/stropts.h	2018-02-22 09:33:05.000000000 -0500
+@@ -24,7 +24,7 @@
+ #ifndef _NFS_UTILS_MOUNT_STROPTS_H
+ #define _NFS_UTILS_MOUNT_STROPTS_H
+ 
+-int nfsmount_string(const char *, const char *, const char *, int,
++int nfsmount_string(const char *, const char *, char *, int,
+ 			char **, int, int);
+ 
+ #endif	/* _NFS_UTILS_MOUNT_STROPTS_H */

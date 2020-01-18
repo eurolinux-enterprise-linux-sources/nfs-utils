@@ -2,7 +2,7 @@ Summary: NFS utilities and supporting clients and daemons for the kernel NFS ser
 Name: nfs-utils
 URL: http://sourceforge.net/projects/nfs
 Version: 1.3.0
-Release: 0.48%{?dist}.2
+Release: 0.48%{?dist}.3
 Epoch: 1
 
 # group all 32bit related archs
@@ -131,6 +131,7 @@ Patch097: nfs-utils-1.3.0-exportfs-path-comp.patch
 Patch098: nfs-utils-1.3.0-mount-addressfailed.patch
 Patch099: nfs-utils-1.3.0-mount-eacces.patch
 Patch100: nfs-utils-1.3.0-mount-minorversion.patch
+Patch101: nfs-utils-1.3.0-mount-t-nfs4.patch
 
 Patch1000: nfs-utils-1.2.1-statdpath-man.patch
 Patch1001: nfs-utils-1.2.1-exp-subtree-warn-off.patch
@@ -388,6 +389,8 @@ This package also contains the mount.nfs and umount.nfs program.
 %patch099 -p1
 # 1547681 - nfs-utils: minorversion can't work
 %patch100 -p1
+# 1551927 - Incorrect NFS version string reported for NFSv4.2 mounts
+%patch101 -p1
 
 %patch1000 -p1
 %patch1001 -p1
@@ -639,6 +642,9 @@ fi
 /sbin/umount.nfs4
 
 %changelog
+* Wed Mar 14 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.48_4.3
+- mount: move handling of "-t nfs4" into nfs_nfs_version() (bz 1551927)
+
 * Thu Feb 22 2018 Steve Dickson <steved@redhat.com> 1.3.0-0.48_4.2
 - mount: Fix problems with parsing minorversion= (bz 1547681)
 
